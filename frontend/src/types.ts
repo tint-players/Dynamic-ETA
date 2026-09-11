@@ -85,7 +85,7 @@ export interface TrainRunViz {
   journey: { source: { block_id: string; position_in_block_m: number }; destination: { block_id: string; position_in_block_m: number } }
   departure_time_s: number
   station_stops: Array<{ station_id: string; dwell_time_s: number }>
-  track_changes: Array<{ crossover_id: string }>
+  track_changes: Array<{ crossover_id: string; reverse_after_change: boolean }>
   source_route_m: number
   destination_route_m: number
 }
