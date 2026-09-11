@@ -79,6 +79,7 @@ additional_train_runs:
       destination: {block_id: "BLK-08", position_in_block_m: 1800}
     departure_time_s: 0
     station_stops:
+      - {station_id: "MATHURA", dwell_time_s: 35}
       - {station_id: "FARAH", dwell_time_s: 45}
       - {station_id: "AGRA-CANTT", dwell_time_s: 35}
     track_changes:
