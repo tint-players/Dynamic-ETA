@@ -25,6 +25,11 @@ class CrossingState(str, Enum):
     CLOSED_FOR_TRAIN = "CLOSED_FOR_TRAIN"
 
 
+class CurveDirection(str, Enum):
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+
+
 class TrackBlock(BaseModel):
     block_id: str
     length_m: float = Field(gt=0)
@@ -32,18 +37,28 @@ class TrackBlock(BaseModel):
     gradient_percent: float = 0.0
     curve_radius_m: Optional[float] = Field(default=None, gt=0)
     curve_speed_limit_kmh: Optional[float] = Field(default=None, gt=0)
+    curve_direction: Optional[CurveDirection] = None
+
+    @model_validator(mode="after")
+    def validate_curve_geometry(self):
+        if self.curve_direction is not None and self.curve_radius_m is None:
+            raise ValueError("curve_direction requires curve_radius_m")
+        return self
 
 
 class Route(BaseModel):
     route_id: str
     route_name: str
+    track_ids: list[str] = Field(default_factory=lambda: ["TRACK-1"], min_length=1)
     blocks: list[TrackBlock] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_unique_blocks(self):
+    def validate_unique_route_ids(self):
         ids = [b.block_id for b in self.blocks]
         if len(ids) != len(set(ids)):
             raise ValueError("block_id values must be unique")
+        if len(self.track_ids) != len(set(self.track_ids)):
+            raise ValueError("route.track_ids values must be unique")
         return self
 
     def block_index(self, block_id: str) -> int:
@@ -74,6 +89,7 @@ class Route(BaseModel):
 class Signal(BaseModel):
     signal_id: str
     protected_block_id: str
+    track_id: str = "TRACK-1"
 
 
 class InitialTrainState(BaseModel):
@@ -85,6 +101,7 @@ class InitialTrainState(BaseModel):
 class TrainConfig(BaseModel):
     train_id: str
     train_name: str = ""
+    track_id: str = "TRACK-1"
     max_speed_kmh: float = Field(gt=0)
     length_m: float = Field(gt=0)
     accel_ms2: float = Field(gt=0)
@@ -185,12 +202,17 @@ class SimulationConfig(BaseModel):
     @model_validator(mode="after")
     def validate_references(self):
         block_ids = {b.block_id for b in self.route.blocks}
+        track_ids = set(self.route.track_ids)
         signal_ids = [s.signal_id for s in self.signals]
         if len(signal_ids) != len(set(signal_ids)):
             raise ValueError("signal_id values must be unique")
+        if self.train.track_id not in track_ids:
+            raise ValueError(f"train.track_id references unknown track {self.train.track_id}")
         for signal in self.signals:
             if signal.protected_block_id not in block_ids:
                 raise ValueError(f"Signal {signal.signal_id} references unknown block {signal.protected_block_id}")
+            if signal.track_id not in track_ids:
+                raise ValueError(f"Signal {signal.signal_id} references unknown track {signal.track_id}")
         if self.train.initial_state.start_block_id not in block_ids:
             raise ValueError("train.initial_state.start_block_id is unknown")
         for endpoint_name, endpoint in (("source", self.journey.source), ("destination", self.journey.destination)):
