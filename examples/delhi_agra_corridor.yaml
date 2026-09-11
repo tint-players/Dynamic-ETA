@@ -81,6 +81,24 @@ additional_train_runs:
     track_changes:
       - {crossover_id: "XOVER-AGRA-01"}
   - train:
+      train_id: "TRAIN-FOLLOW-UP"
+      train_name: "Taj Local"
+      track_id: "TRACK-UP"
+      max_speed_kmh: 95
+      length_m: 240
+      accel_ms2: 0.38
+      service_decel_ms2: 0.62
+      emergency_decel_ms2: 0.95
+      initial_state: {start_block_id: "BLK-01", position_in_block_m: 0, initial_speed_kmh: 0}
+    journey:
+      source: {block_id: "BLK-01", position_in_block_m: 0}
+      destination: {block_id: "BLK-07", position_in_block_m: 2100}
+    departure_time_s: 150
+    station_stops:
+      - {station_id: "BALLABGARH", dwell_time_s: 30}
+      - {station_id: "MATHURA", dwell_time_s: 50}
+      - {station_id: "FARAH", dwell_time_s: 30}
+  - train:
       train_id: "TRAIN-DOWN-01"
       train_name: "Agra Delhi Express"
       track_id: "TRACK-DOWN"
@@ -99,25 +117,6 @@ additional_train_runs:
       - {station_id: "FARAH", dwell_time_s: 25}
       - {station_id: "MATHURA", dwell_time_s: 40}
       - {station_id: "BALLABGARH", dwell_time_s: 25}
-  - train:
-      train_id: "TRAIN-DOWN-02"
-      train_name: "Agra Delhi Return"
-      track_id: "TRACK-DOWN"
-      max_speed_kmh: 105
-      length_m: 260
-      accel_ms2: 0.4
-      service_decel_ms2: 0.64
-      emergency_decel_ms2: 0.95
-      initial_state: {start_block_id: "BLK-08", position_in_block_m: 1750, initial_speed_kmh: 0}
-    journey:
-      source: {block_id: "BLK-08", position_in_block_m: 1750}
-      destination: {block_id: "BLK-02", position_in_block_m: 200}
-    departure_time_s: 260
-    station_stops:
-      - {station_id: "AGRA-CANTT", dwell_time_s: 30}
-      - {station_id: "FARAH", dwell_time_s: 30}
-      - {station_id: "MATHURA", dwell_time_s: 35}
-      - {station_id: "BALLABGARH", dwell_time_s: 20}
 
 stations:
   - station_id: "BALLABGARH"
