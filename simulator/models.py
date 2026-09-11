@@ -30,6 +30,11 @@ class CurveDirection(str, Enum):
     RIGHT = "RIGHT"
 
 
+class TrainDirection(str, Enum):
+    FORWARD = "FORWARD"
+    REVERSE = "REVERSE"
+
+
 class TrackBlock(BaseModel):
     block_id: str
     length_m: float = Field(gt=0)
@@ -90,6 +95,7 @@ class Signal(BaseModel):
     signal_id: str
     protected_block_id: str
     track_id: str = "TRACK-1"
+    direction: TrainDirection = TrainDirection.FORWARD
 
 
 class InitialTrainState(BaseModel):
@@ -118,6 +124,32 @@ class JourneyEndpoint(BaseModel):
 class Journey(BaseModel):
     source: JourneyEndpoint
     destination: JourneyEndpoint
+
+
+class StationPlatform(BaseModel):
+    platform_id: str
+    track_id: str
+    block_id: str
+    position_in_block_m: float = Field(ge=0)
+    length_m: float = Field(default=350.0, gt=0)
+
+
+class Station(BaseModel):
+    station_id: str
+    station_name: str
+    platforms: list[StationPlatform] = Field(min_length=1)
+
+
+class StationStop(BaseModel):
+    station_id: str
+    dwell_time_s: float = Field(default=30.0, ge=0)
+
+
+class TrainRun(BaseModel):
+    train: TrainConfig
+    journey: Journey
+    departure_time_s: float = Field(default=0.0, ge=0)
+    station_stops: list[StationStop] = Field(default_factory=list)
 
 
 class WeatherTimelineEntry(BaseModel):
@@ -189,6 +221,7 @@ class SimulationSettings(BaseModel):
     random_seed: Optional[int] = None
     braking_safety_margin_m: float = Field(default=15.0, ge=0)
     speed_tolerance_kmh: float = Field(default=0.5, ge=0)
+    train_separation_m: float = Field(default=120.0, ge=0)
 
 
 class SimulationConfig(BaseModel):
@@ -196,8 +229,39 @@ class SimulationConfig(BaseModel):
     signals: list[Signal]
     train: TrainConfig
     journey: Journey
+    primary_station_stops: list[StationStop] = Field(default_factory=list)
+    additional_train_runs: list[TrainRun] = Field(default_factory=list)
+    stations: list[Station] = Field(default_factory=list)
+    dynamic_signalling: bool = False
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
+
+    def _endpoint_m(self, endpoint: JourneyEndpoint) -> float:
+        return self.route.block_start_distance_m(endpoint.block_id) + endpoint.position_in_block_m
+
+    def _validate_train(self, train: TrainConfig, label: str, block_ids: set[str], track_ids: set[str]) -> None:
+        if train.track_id not in track_ids:
+            raise ValueError(f"{label}.track_id references unknown track {train.track_id}")
+        if train.initial_state.start_block_id not in block_ids:
+            raise ValueError(f"{label}.initial_state.start_block_id is unknown")
+        start_block = self.route.blocks[self.route.block_index(train.initial_state.start_block_id)]
+        if train.initial_state.position_in_block_m > start_block.length_m:
+            raise ValueError(f"{label} initial position exceeds start block length")
+        if train.initial_state.initial_speed_kmh > train.max_speed_kmh:
+            raise ValueError(f"{label}.initial_speed_kmh cannot exceed train max_speed_kmh")
+
+    def _validate_journey(self, journey: Journey, label: str, block_ids: set[str]) -> tuple[float, float]:
+        for endpoint_name, endpoint in (("source", journey.source), ("destination", journey.destination)):
+            if endpoint.block_id not in block_ids:
+                raise ValueError(f"{label}.{endpoint_name}.block_id is unknown")
+            block = self.route.blocks[self.route.block_index(endpoint.block_id)]
+            if endpoint.position_in_block_m > block.length_m:
+                raise ValueError(f"{label}.{endpoint_name}.position_in_block_m exceeds block length")
+        source_m = self._endpoint_m(journey.source)
+        destination_m = self._endpoint_m(journey.destination)
+        if abs(destination_m - source_m) <= 1e-6:
+            raise ValueError(f"{label} source and destination must differ")
+        return source_m, destination_m
 
     @model_validator(mode="after")
     def validate_references(self):
@@ -206,26 +270,50 @@ class SimulationConfig(BaseModel):
         signal_ids = [s.signal_id for s in self.signals]
         if len(signal_ids) != len(set(signal_ids)):
             raise ValueError("signal_id values must be unique")
-        if self.train.track_id not in track_ids:
-            raise ValueError(f"train.track_id references unknown track {self.train.track_id}")
+
+        self._validate_train(self.train, "train", block_ids, track_ids)
+        primary_source, primary_destination = self._validate_journey(self.journey, "journey", block_ids)
+        if primary_destination <= primary_source:
+            raise ValueError("primary journey destination must be after source for legacy single-train compatibility")
+
         for signal in self.signals:
             if signal.protected_block_id not in block_ids:
                 raise ValueError(f"Signal {signal.signal_id} references unknown block {signal.protected_block_id}")
             if signal.track_id not in track_ids:
                 raise ValueError(f"Signal {signal.signal_id} references unknown track {signal.track_id}")
-        if self.train.initial_state.start_block_id not in block_ids:
-            raise ValueError("train.initial_state.start_block_id is unknown")
-        for endpoint_name, endpoint in (("source", self.journey.source), ("destination", self.journey.destination)):
-            if endpoint.block_id not in block_ids:
-                raise ValueError(f"journey.{endpoint_name}.block_id is unknown")
-            block = self.route.blocks[self.route.block_index(endpoint.block_id)]
-            if endpoint.position_in_block_m > block.length_m:
-                raise ValueError(f"journey.{endpoint_name}.position_in_block_m exceeds block length")
-        start_block = self.route.blocks[self.route.block_index(self.train.initial_state.start_block_id)]
-        if self.train.initial_state.position_in_block_m > start_block.length_m:
-            raise ValueError("train initial position exceeds start block length")
-        if self.train.initial_state.initial_speed_kmh > self.train.max_speed_kmh:
-            raise ValueError("initial_speed_kmh cannot exceed train max_speed_kmh")
+
+        station_ids = [station.station_id for station in self.stations]
+        if len(station_ids) != len(set(station_ids)):
+            raise ValueError("station_id values must be unique")
+        platform_ids: set[str] = set()
+        for station in self.stations:
+            for platform in station.platforms:
+                if platform.platform_id in platform_ids:
+                    raise ValueError(f"Duplicate platform_id {platform.platform_id}")
+                platform_ids.add(platform.platform_id)
+                if platform.track_id not in track_ids:
+                    raise ValueError(f"Platform {platform.platform_id} references unknown track")
+                if platform.block_id not in block_ids:
+                    raise ValueError(f"Platform {platform.platform_id} references unknown block")
+                block = self.route.blocks[self.route.block_index(platform.block_id)]
+                if platform.position_in_block_m > block.length_m:
+                    raise ValueError(f"Platform {platform.platform_id} exceeds block length")
+
+        station_set = set(station_ids)
+        for stop in self.primary_station_stops:
+            if stop.station_id not in station_set:
+                raise ValueError(f"Primary stop references unknown station {stop.station_id}")
+
+        train_ids = [self.train.train_id]
+        for i, run in enumerate(self.additional_train_runs):
+            self._validate_train(run.train, f"additional_train_runs[{i}].train", block_ids, track_ids)
+            self._validate_journey(run.journey, f"additional_train_runs[{i}].journey", block_ids)
+            train_ids.append(run.train.train_id)
+            for stop in run.station_stops:
+                if stop.station_id not in station_set:
+                    raise ValueError(f"Train {run.train.train_id} stop references unknown station {stop.station_id}")
+        if len(train_ids) != len(set(train_ids)):
+            raise ValueError("train_id values must be unique across all train runs")
 
         signal_set = set(signal_ids)
         for schedule in self.environment.signal_states:
@@ -249,11 +337,6 @@ class SimulationConfig(BaseModel):
             if crossing.position_in_block_m > block.length_m:
                 raise ValueError(f"Crossing {crossing.crossing_id} exceeds block length")
             self._validate_timeline(crossing.timeline, f"crossing {crossing.crossing_id}")
-
-        source_m = self.route.block_start_distance_m(self.journey.source.block_id) + self.journey.source.position_in_block_m
-        destination_m = self.route.block_start_distance_m(self.journey.destination.block_id) + self.journey.destination.position_in_block_m
-        if destination_m <= source_m:
-            raise ValueError("destination must be after source on the v1 linear route")
         return self
 
     @staticmethod
@@ -270,6 +353,12 @@ class TelemetryFrame(BaseModel):
     train_id: str
     tick: int
     sim_time_s: float
+
+    track_id: str = "TRACK-1"
+    direction: TrainDirection = TrainDirection.FORWARD
+    active: bool = True
+    completed: bool = False
+    current_station_id: Optional[str] = None
 
     current_block_id: str
     position_in_block_m: float
