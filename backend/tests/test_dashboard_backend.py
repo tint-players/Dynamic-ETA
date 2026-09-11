@@ -9,7 +9,7 @@ from backend.session import SessionManager
 from backend.viz import config_for_visualization
 from simulator.engine import SimulationEngine
 from simulator.models import SignalAspect
-from simulator.network_engine_v3 import NetworkSimulationEngineV3
+from simulator.network_engine import NetworkSimulationEngine
 
 
 client = TestClient(app)
@@ -27,6 +27,9 @@ def test_visual_config_uses_backend_route_geometry():
     assert payload["signals"][8]["route_position_m"] == config.route.total_length_m
     assert len(payload["stations"]) == 4
     assert len(payload["trains"]) == 4
+    assert len(payload["crossovers"]) == 1
+    assert payload["crossovers"][0]["from_track_id"] == "TRACK-UP"
+    assert payload["crossovers"][0]["to_track_id"] == "TRACK-DOWN"
     assert payload["dynamic_signalling"] is True
 
 
@@ -47,28 +50,34 @@ def test_reset_reconstructs_all_initial_train_states():
 
 def test_dynamic_signals_are_derived_from_track_occupancy():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngineV3(config, scenario_id="signals")
+    engine = NetworkSimulationEngine(config, scenario_id="signals")
     states = engine.signal_states()
     assert states["UP-03"] == SignalAspect.RED
     assert states["DN-08"] == SignalAspect.GREEN
     for _ in range(60): engine.tick()
-    assert engine.sim_time_s >= engine.trains[-1].departure_time_s
+    assert engine.sim_time_s >= engine.trains[2].departure_time_s
     assert engine.signal_states()["DN-08"] == SignalAspect.RED
 
 
-def test_multi_train_engine_contains_same_and_opposite_track_runs_and_station_dwells():
+def test_fleet_is_two_up_two_down_and_crossover_train_changes_track():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngineV3(config, scenario_id="multi")
-    assert [train.train.track_id for train in engine.trains].count("TRACK-UP") == 3
-    assert [train.train.track_id for train in engine.trains].count("TRACK-DOWN") == 1
-    assert engine.trains[-1].direction.value == "REVERSE"
+    engine = NetworkSimulationEngine(config, scenario_id="multi")
+    assert sum(t.direction.value == "FORWARD" for t in engine.trains) == 2
+    assert sum(t.direction.value == "REVERSE" for t in engine.trains) == 2
+    crossover_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
+    assert crossover_train.current_track_id == "TRACK-UP"
     saw_station_dwell = False
-    for _ in range(1800):
+    changed_track = False
+    for _ in range(2400):
         frames = engine.tick()
-        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames):
-            saw_station_dwell = True
+        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames): saw_station_dwell = True
+        frame = next(f for f in frames if f.train_id == "TRAIN-CROSS-UP")
+        if frame.track_id == "TRACK-DOWN":
+            changed_track = True
             break
     assert saw_station_dwell
+    assert changed_track
+    assert "XOVER-AGRA-01" in crossover_train.completed_crossovers
 
 
 def test_playback_rate_never_changes_legacy_primary_physics():
@@ -88,21 +97,7 @@ def test_completed_dashboard_run_exports_each_train_with_labels(tmp_path, monkey
     for _ in range(7200):
         if session.engine.is_complete: break
         session.tick()
-    if not session.engine.is_complete:
-        state = [
-            (
-                train.train.train_id,
-                train.route_position_m,
-                train.destination_m,
-                train.speed_kmh,
-                train.completed,
-                train.dwelling_station_id,
-                train.dwell_until_s,
-                sorted(train.served_stations),
-            )
-            for train in session.engine.trains
-        ]
-        raise AssertionError(f"network did not complete: {state}")
+    assert session.engine.is_complete
     assert session.export_paths is not None
     actual_csv = tmp_path / Path(session.export_paths["csv"]).name
     actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
