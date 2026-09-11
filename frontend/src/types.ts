@@ -1,6 +1,7 @@
 export type SignalAspect = 'GREEN' | 'YELLOW' | 'RED'
 export type WeatherCondition = 'CLEAR' | 'RAIN' | 'HEAVY_RAIN' | 'FOG' | 'HEAVY_FOG'
 export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
+export type CurveDirection = 'LEFT' | 'RIGHT'
 
 export interface TimelineEntry<T extends string> {
   start_time_s: number
@@ -17,6 +18,7 @@ export interface TrackBlockViz {
   gradient_percent: number
   curve_radius_m: number | null
   curve_speed_limit_kmh: number | null
+  curve_direction: CurveDirection | null
   route_start_m: number
   route_end_m: number
 }
@@ -24,6 +26,7 @@ export interface TrackBlockViz {
 export interface SignalViz {
   signal_id: string
   protected_block_id: string
+  track_id: string
   route_position_m: number
 }
 
@@ -64,6 +67,7 @@ export interface WeatherSchedule {
 export interface TrainConfigViz {
   train_id: string
   train_name: string
+  track_id: string
   max_speed_kmh: number
   length_m: number
   accel_ms2: number
@@ -75,6 +79,7 @@ export interface SimulatorConfigViz {
   route: {
     route_id: string
     route_name: string
+    track_ids: string[]
     total_length_m: number
     blocks: TrackBlockViz[]
   }
