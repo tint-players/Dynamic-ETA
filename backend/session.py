@@ -6,11 +6,14 @@ from threading import Lock
 from uuid import uuid4
 
 from simulator.config_loader import load_simulation_config
+from simulator.dataset import label_completed_journey
 from simulator.engine import SimulationEngine
+from simulator.exporters import BatchExporter
 from simulator.models import SimulationConfig, TelemetryFrame
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "dashboard_runs"
 
 
 @dataclass
@@ -23,6 +26,12 @@ class SimulationSession:
     playback_speed: float = 1.0
     playing: bool = False
     lock: Lock = field(default_factory=Lock)
+    frames: list[TelemetryFrame] = field(default_factory=list)
+    export_paths: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.frames:
+            self.frames = [self.engine.snapshot()]
 
     def snapshot(self) -> TelemetryFrame:
         with self.lock:
@@ -30,14 +39,39 @@ class SimulationSession:
 
     def tick(self) -> list[TelemetryFrame]:
         with self.lock:
-            return self.engine.tick()
+            frames = self.engine.tick()
+            if frames:
+                self.frames.extend(frames)
+                if self.engine.is_complete and self.export_paths is None:
+                    self.export_paths = self._export_completed_journey()
+            return frames
+
+    def _export_completed_journey(self) -> dict[str, str]:
+        labelled = label_completed_journey(self.frames)
+        exporter = BatchExporter()
+        exporter.add(labelled)
+
+        stem = f"{self.scenario_id}_{self.session_id[:8]}"
+        csv_path = OUTPUT_DIR / f"{stem}.csv"
+        parquet_path = OUTPUT_DIR / f"{stem}.parquet"
+        exporter.to_csv(csv_path)
+        exporter.to_parquet(parquet_path)
+
+        repo_root = Path(__file__).resolve().parents[1]
+        return {
+            "csv": csv_path.relative_to(repo_root).as_posix(),
+            "parquet": parquet_path.relative_to(repo_root).as_posix(),
+        }
 
     def reset(self) -> TelemetryFrame:
         with self.lock:
             self.engine = SimulationEngine(self.config, scenario_id=self.scenario_id)
             self.playing = False
             self.playback_speed = 1.0
-            return self.engine.snapshot()
+            frame = self.engine.snapshot()
+            self.frames = [frame]
+            self.export_paths = None
+            return frame
 
 
 class SessionManager:
