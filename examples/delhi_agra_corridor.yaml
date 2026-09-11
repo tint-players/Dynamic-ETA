@@ -1,92 +1,36 @@
 route:
   route_id: "GT-DELHI-AGRA-01"
-  route_name: "Grand Trunk Delhi-Agra Section"
-  track_ids:
-    - "TRACK-UP"
-    - "TRACK-DOWN"
+  route_name: "Grand Trunk Delhi-Agra Multi-Train Section"
+  track_ids: ["TRACK-UP", "TRACK-DOWN"]
   blocks:
-    - block_id: "BLK-01"
-      length_m: 2000
-      speed_limit_kmh: 110
-      gradient_percent: 0.2
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-02"
-      length_m: 2500
-      speed_limit_kmh: 110
-      gradient_percent: 0.4
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-03"
-      length_m: 1800
-      speed_limit_kmh: 130
-      gradient_percent: -0.3
-      curve_radius_m: 750
-      curve_speed_limit_kmh: 80
-      curve_direction: "RIGHT"
-    - block_id: "BLK-04"
-      length_m: 2200
-      speed_limit_kmh: 130
-      gradient_percent: 0.0
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-05"
-      length_m: 3000
-      speed_limit_kmh: 110
-      gradient_percent: 0.5
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-06"
-      length_m: 2000
-      speed_limit_kmh: 100
-      gradient_percent: -0.2
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-07"
-      length_m: 2400
-      speed_limit_kmh: 110
-      gradient_percent: 0.1
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
-    - block_id: "BLK-08"
-      length_m: 2000
-      speed_limit_kmh: 110
-      gradient_percent: 0.0
-      curve_radius_m: null
-      curve_speed_limit_kmh: null
-      curve_direction: null
+    - {block_id: "BLK-01", length_m: 2000, speed_limit_kmh: 110, gradient_percent: 0.2, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
+    - {block_id: "BLK-02", length_m: 2500, speed_limit_kmh: 110, gradient_percent: 0.4, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
+    - {block_id: "BLK-03", length_m: 1800, speed_limit_kmh: 130, gradient_percent: -0.3, curve_radius_m: 750, curve_speed_limit_kmh: 80, curve_direction: "RIGHT"}
+    - {block_id: "BLK-04", length_m: 2200, speed_limit_kmh: 130, gradient_percent: 0.0, curve_radius_m: 1100, curve_speed_limit_kmh: 105, curve_direction: "LEFT"}
+    - {block_id: "BLK-05", length_m: 3000, speed_limit_kmh: 110, gradient_percent: 0.5, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
+    - {block_id: "BLK-06", length_m: 2000, speed_limit_kmh: 100, gradient_percent: -0.2, curve_radius_m: 900, curve_speed_limit_kmh: 90, curve_direction: "LEFT"}
+    - {block_id: "BLK-07", length_m: 2400, speed_limit_kmh: 110, gradient_percent: 0.1, curve_radius_m: 1250, curve_speed_limit_kmh: 100, curve_direction: "RIGHT"}
+    - {block_id: "BLK-08", length_m: 2000, speed_limit_kmh: 110, gradient_percent: 0.0, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
 
 signals:
-  - signal_id: "SIG-01"
-    protected_block_id: "BLK-01"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-02"
-    protected_block_id: "BLK-02"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-03"
-    protected_block_id: "BLK-03"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-04"
-    protected_block_id: "BLK-04"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-05"
-    protected_block_id: "BLK-05"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-06"
-    protected_block_id: "BLK-06"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-07"
-    protected_block_id: "BLK-07"
-    track_id: "TRACK-UP"
-  - signal_id: "SIG-08"
-    protected_block_id: "BLK-08"
-    track_id: "TRACK-UP"
+  - {signal_id: "UP-01", protected_block_id: "BLK-01", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-02", protected_block_id: "BLK-02", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-03", protected_block_id: "BLK-03", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-04", protected_block_id: "BLK-04", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-05", protected_block_id: "BLK-05", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-06", protected_block_id: "BLK-06", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-07", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "UP-08", protected_block_id: "BLK-08", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "DN-08", protected_block_id: "BLK-08", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-07", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-06", protected_block_id: "BLK-06", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-05", protected_block_id: "BLK-05", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-04", protected_block_id: "BLK-04", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-03", protected_block_id: "BLK-03", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-02", protected_block_id: "BLK-02", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "DN-01", protected_block_id: "BLK-01", track_id: "TRACK-DOWN", direction: "REVERSE"}
+
+dynamic_signalling: true
 
 train:
   train_id: "TRAIN-12002"
@@ -97,127 +41,133 @@ train:
   accel_ms2: 0.5
   service_decel_ms2: 0.7
   emergency_decel_ms2: 1.0
-  initial_state:
-    start_block_id: "BLK-01"
-    position_in_block_m: 0
-    initial_speed_kmh: 0
+  initial_state: {start_block_id: "BLK-01", position_in_block_m: 0, initial_speed_kmh: 0}
 
 journey:
-  source:
-    block_id: "BLK-01"
-    position_in_block_m: 0
-  destination:
-    block_id: "BLK-08"
-    position_in_block_m: 2000
+  source: {block_id: "BLK-01", position_in_block_m: 0}
+  destination: {block_id: "BLK-08", position_in_block_m: 2000}
+
+primary_station_stops:
+  - {station_id: "MATHURA", dwell_time_s: 35}
+  - {station_id: "FARAH", dwell_time_s: 25}
+  - {station_id: "AGRA-CANTT", dwell_time_s: 40}
+
+additional_train_runs:
+  - train:
+      train_id: "TRAIN-LEAD-UP"
+      train_name: "Intercity Express"
+      track_id: "TRACK-UP"
+      max_speed_kmh: 110
+      length_m: 280
+      accel_ms2: 0.42
+      service_decel_ms2: 0.65
+      emergency_decel_ms2: 1.0
+      initial_state: {start_block_id: "BLK-03", position_in_block_m: 200, initial_speed_kmh: 0}
+    journey:
+      source: {block_id: "BLK-03", position_in_block_m: 200}
+      destination: {block_id: "BLK-08", position_in_block_m: 1800}
+    departure_time_s: 0
+    station_stops:
+      - {station_id: "FARAH", dwell_time_s: 45}
+      - {station_id: "AGRA-CANTT", dwell_time_s: 35}
+  - train:
+      train_id: "TRAIN-FOLLOW-UP"
+      train_name: "Taj Local"
+      track_id: "TRACK-UP"
+      max_speed_kmh: 95
+      length_m: 240
+      accel_ms2: 0.38
+      service_decel_ms2: 0.62
+      emergency_decel_ms2: 0.95
+      initial_state: {start_block_id: "BLK-01", position_in_block_m: 0, initial_speed_kmh: 0}
+    journey:
+      source: {block_id: "BLK-01", position_in_block_m: 0}
+      destination: {block_id: "BLK-07", position_in_block_m: 2100}
+    departure_time_s: 150
+    station_stops:
+      - {station_id: "BALLABGARH", dwell_time_s: 30}
+      - {station_id: "MATHURA", dwell_time_s: 50}
+      - {station_id: "FARAH", dwell_time_s: 30}
+  - train:
+      train_id: "TRAIN-DOWN-01"
+      train_name: "Agra Delhi Express"
+      track_id: "TRACK-DOWN"
+      max_speed_kmh: 120
+      length_m: 300
+      accel_ms2: 0.46
+      service_decel_ms2: 0.68
+      emergency_decel_ms2: 1.0
+      initial_state: {start_block_id: "BLK-08", position_in_block_m: 1900, initial_speed_kmh: 0}
+    journey:
+      source: {block_id: "BLK-08", position_in_block_m: 1900}
+      destination: {block_id: "BLK-01", position_in_block_m: 100}
+    departure_time_s: 55
+    station_stops:
+      - {station_id: "AGRA-CANTT", dwell_time_s: 35}
+      - {station_id: "FARAH", dwell_time_s: 25}
+      - {station_id: "MATHURA", dwell_time_s: 40}
+      - {station_id: "BALLABGARH", dwell_time_s: 25}
+
+stations:
+  - station_id: "BALLABGARH"
+    station_name: "Ballabgarh"
+    platforms:
+      - {platform_id: "BAL-UP", track_id: "TRACK-UP", block_id: "BLK-02", position_in_block_m: 1150, length_m: 360}
+      - {platform_id: "BAL-DN", track_id: "TRACK-DOWN", block_id: "BLK-02", position_in_block_m: 1150, length_m: 360}
+  - station_id: "MATHURA"
+    station_name: "Mathura Junction"
+    platforms:
+      - {platform_id: "MTJ-UP", track_id: "TRACK-UP", block_id: "BLK-03", position_in_block_m: 1200, length_m: 420}
+      - {platform_id: "MTJ-DN", track_id: "TRACK-DOWN", block_id: "BLK-03", position_in_block_m: 1200, length_m: 420}
+  - station_id: "FARAH"
+    station_name: "Farah"
+    platforms:
+      - {platform_id: "FAR-UP", track_id: "TRACK-UP", block_id: "BLK-05", position_in_block_m: 1450, length_m: 330}
+      - {platform_id: "FAR-DN", track_id: "TRACK-DOWN", block_id: "BLK-05", position_in_block_m: 1450, length_m: 330}
+  - station_id: "AGRA-CANTT"
+    station_name: "Agra Cantt"
+    platforms:
+      - {platform_id: "AGC-UP", track_id: "TRACK-UP", block_id: "BLK-07", position_in_block_m: 1500, length_m: 460}
+      - {platform_id: "AGC-DN", track_id: "TRACK-DOWN", block_id: "BLK-07", position_in_block_m: 1500, length_m: 460}
 
 environment:
   weather:
-    - block_id: "BLK-01"
-      timeline:
-        - start_time_s: 0
-          condition: "CLEAR"
-          visibility_m: 10000
-    - block_id: "BLK-02"
-      timeline:
-        - start_time_s: 0
-          condition: "RAIN"
-          visibility_m: 4000
-    - block_id: "BLK-03"
-      timeline:
-        - start_time_s: 0
-          condition: "HEAVY_RAIN"
-          visibility_m: 1800
-    - block_id: "BLK-04"
-      timeline:
-        - start_time_s: 0
-          condition: "CLEAR"
-          visibility_m: 10000
-    - block_id: "BLK-05"
-      timeline:
-        - start_time_s: 0
-          condition: "FOG"
-          visibility_m: 700
-    - block_id: "BLK-06"
-      timeline:
-        - start_time_s: 0
-          condition: "CLEAR"
-          visibility_m: 10000
-    - block_id: "BLK-07"
-      timeline:
-        - start_time_s: 0
-          condition: "CLEAR"
-          visibility_m: 10000
-    - block_id: "BLK-08"
-      timeline:
-        - start_time_s: 0
-          condition: "CLEAR"
-          visibility_m: 10000
-
+    - {block_id: "BLK-01", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
+    - {block_id: "BLK-02", timeline: [{start_time_s: 0, condition: "RAIN", visibility_m: 4000}]}
+    - {block_id: "BLK-03", timeline: [{start_time_s: 0, condition: "HEAVY_RAIN", visibility_m: 1800}]}
+    - {block_id: "BLK-04", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
+    - {block_id: "BLK-05", timeline: [{start_time_s: 0, condition: "FOG", visibility_m: 700}]}
+    - {block_id: "BLK-06", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
+    - {block_id: "BLK-07", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
+    - {block_id: "BLK-08", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
   signal_states:
-    - signal_id: "SIG-01"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-02"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-03"
-      timeline:
-        - start_time_s: 0
-          aspect: "YELLOW"
-        - start_time_s: 180
-          aspect: "GREEN"
-    - signal_id: "SIG-04"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-05"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-06"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-07"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-    - signal_id: "SIG-08"
-      timeline:
-        - start_time_s: 0
-          aspect: "GREEN"
-
+    - {signal_id: "UP-01", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-02", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-03", timeline: [{start_time_s: 0, aspect: "YELLOW"}, {start_time_s: 180, aspect: "GREEN"}]}
+    - {signal_id: "UP-04", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-05", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-06", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-07", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
+    - {signal_id: "UP-08", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
   temporary_speed_restrictions:
-    - restriction_id: "TSR-001"
-      block_id: "BLK-03"
-      start_position_m: 500
-      end_position_m: 1200
-      speed_limit_kmh: 50
-      start_time_s: 0
-      end_time_s: null
-
+    - {restriction_id: "TSR-001", block_id: "BLK-03", start_position_m: 500, end_position_m: 1200, speed_limit_kmh: 50, start_time_s: 0, end_time_s: null}
   maintenance_restrictions:
-    - restriction_id: "MNT-001"
-      block_id: "BLK-06"
-      start_position_m: 400
-      end_position_m: 900
-      speed_limit_kmh: 60
-      start_time_s: 0
-      end_time_s: null
-
+    - {restriction_id: "MNT-001", block_id: "BLK-06", start_position_m: 400, end_position_m: 900, speed_limit_kmh: 60, start_time_s: 0, end_time_s: null}
   crossings:
     - crossing_id: "XING-001"
       block_id: "BLK-05"
       position_in_block_m: 1700
       timeline:
-        - start_time_s: 0
-          state: "OPEN_FOR_TRAIN"
-        - start_time_s: 300
-          state: "CLOSED_FOR_TRAIN"
-        - start_time_s: 360
-          state: "OPEN_FOR_TRAIN"
+        - {start_time_s: 0, state: "OPEN_FOR_TRAIN"}
+        - {start_time_s: 300, state: "CLOSED_FOR_TRAIN"}
+        - {start_time_s: 360, state: "OPEN_FOR_TRAIN"}
+    - crossing_id: "XING-002"
+      block_id: "BLK-07"
+      position_in_block_m: 700
+      timeline:
+        - {start_time_s: 0, state: "OPEN_FOR_TRAIN"}
+        - {start_time_s: 510, state: "CLOSED_FOR_TRAIN"}
+        - {start_time_s: 565, state: "OPEN_FOR_TRAIN"}
 
 simulation:
   tick_seconds: 1.0
@@ -225,3 +175,4 @@ simulation:
   random_seed: 42
   braking_safety_margin_m: 15
   speed_tolerance_kmh: 0.5
+  train_separation_m: 140
