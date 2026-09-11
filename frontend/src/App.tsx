@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 
 import { connectSimulation, createSession, sendCommand } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
-import type { PlaybackState, SessionCreateResponse, SocketMessage, TelemetryFrame } from './types'
+import type {
+  PlaybackState,
+  SessionCreateResponse,
+  SimulatorConfigViz,
+  SocketMessage,
+  TelemetryFrame,
+} from './types'
 
 const initialPlayback: PlaybackState = {
   playing: false,
@@ -10,8 +16,24 @@ const initialPlayback: PlaybackState = {
   complete: false,
 }
 
-function transitionEvents(previous: TelemetryFrame | null, current: TelemetryFrame): DebugEvent[] {
-  if (!previous) return [{ id: `start-${current.tick}`, time: current.sim_time_s, text: `Simulation ready in ${current.current_block_id}` }]
+function activeValue<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
+  let active: T | undefined
+  for (const entry of timeline) {
+    if (entry.start_time_s <= simTime) active = entry
+    else break
+  }
+  return active
+}
+
+function transitionEvents(
+  config: SimulatorConfigViz,
+  previous: TelemetryFrame | null,
+  current: TelemetryFrame,
+): DebugEvent[] {
+  if (!previous) {
+    return [{ id: `start-${current.tick}`, time: current.sim_time_s, text: `Simulation ready in ${current.current_block_id}` }]
+  }
+
   const events: DebugEvent[] = []
   const add = (suffix: string, text: string) => {
     events.push({ id: `${current.tick}-${suffix}`, time: current.sim_time_s, text })
@@ -29,6 +51,21 @@ function transitionEvents(previous: TelemetryFrame | null, current: TelemetryFra
   if (previous.speed_kmh <= 0.2 && current.speed_kmh > 0.2) {
     add('resume', 'Train resumed')
   }
+
+  for (const schedule of config.environment.signal_states) {
+    const before = activeValue(schedule.timeline, previous.sim_time_s)?.aspect ?? 'GREEN'
+    const after = activeValue(schedule.timeline, current.sim_time_s)?.aspect ?? 'GREEN'
+    if (before !== after) add(`signal-${schedule.signal_id}`, `${schedule.signal_id}: ${before} → ${after}`)
+  }
+
+  for (const crossing of config.environment.crossings) {
+    const before = activeValue(crossing.timeline, previous.sim_time_s)?.state ?? 'OPEN_FOR_TRAIN'
+    const after = activeValue(crossing.timeline, current.sim_time_s)?.state ?? 'OPEN_FOR_TRAIN'
+    if (before !== after) {
+      add(`crossing-${crossing.crossing_id}`, `${crossing.crossing_id}: ${before.replaceAll('_', ' ')} → ${after.replaceAll('_', ' ')}`)
+    }
+  }
+
   if (current.distance_to_destination_m === 0 && previous.distance_to_destination_m > 0) {
     add('destination', 'Reached destination')
   }
@@ -56,6 +93,7 @@ export default function App() {
         setSession(created)
         setFrame(created.initial_frame)
         setHistory([created.initial_frame])
+        setEvents([{ id: 'start-0', time: 0, text: `Simulation ready in ${created.initial_frame.current_block_id}` }])
         previousFrameRef.current = created.initial_frame
 
         socketRef.current = connectSimulation(
@@ -72,7 +110,7 @@ export default function App() {
                   if (items.at(-1)?.tick === next.tick && items.at(-1)?.sim_time_s === next.sim_time_s) return items
                   return [...items, next]
                 })
-                const additions = transitionEvents(previousFrameRef.current, next)
+                const additions = transitionEvents(created.config, previousFrameRef.current, next)
                 if (additions.length) setEvents((items) => [...items, ...additions].slice(-250))
               }
               previousFrameRef.current = next
