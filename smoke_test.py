@@ -6,55 +6,69 @@ from simulator import (
     SimulationEngine,
     ScenarioGenerator,
     ScenarioGeneratorConfig,
-    LiveExporter,
-    AnomalyInjector,
-    AnomalyRequest,
-    AnomalyType,
-    SignalAspect,
+    label_completed_journey,
 )
+from simulator.models import SignalAspect, SignalStateSchedule, SignalTimelineEntry
 
-# 1. Load config from YAML
 config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-print(f"Loaded corridor '{config.corridor.name}' with {len(config.corridor.blocks)} blocks, "
-      f"{len(config.trains)} train(s)")
+assert len(config.route.blocks) == 8
+assert len(config.signals) == 8
 
-# 2. Live-mode style: run engine tick by tick, JSON-serialize a frame
-engine = SimulationEngine(config, scenario_id="live_demo")
-for _ in range(5):
-    frames = engine.tick()
-print("Sample live JSON frame:")
-print(LiveExporter.to_json(frames[0]))
+# 1. Full source-to-destination run.
+engine = SimulationEngine(config, scenario_id="single_run")
+frames = engine.run()
+assert engine.is_complete
+assert frames[0].sim_time_s == 0
+assert frames[-1].distance_to_destination_m == 0
+assert frames[-1].speed_kmh == 0
+assert all(frames[i].route_position_m <= frames[i + 1].route_position_m for i in range(len(frames) - 1))
 
-# 3. Guardrail test: try to force a RED signal on the immediate next block
-#    at high speed -> should be rejected and redirected
-injector = AnomalyInjector(config.corridor, config.caution_speed_kmh)
-train_id = config.trains[0].train_id
-state = engine.train_states[train_id]
-current_block = config.corridor.blocks[state.block_index]
-print(f"\nTrain at block {current_block.block_id}, speed={state.speed_kmh:.1f} km/h")
+# 2. Exact ground-truth remaining-time labels.
+labelled = label_completed_journey(frames)
+assert labelled[-1].actual_remaining_time_s == 0
+assert labelled[0].actual_remaining_time_s == labelled[-1].sim_time_s
+assert all(x.actual_remaining_time_s >= y.actual_remaining_time_s for x, y in zip(labelled, labelled[1:]))
 
-result = injector.inject(
-    AnomalyRequest(
-        anomaly_type=AnomalyType.SIGNAL_ASPECT_CHANGE,
-        block_id=config.corridor.blocks[state.block_index + 1].block_id,
-        signal_aspect=SignalAspect.RED,
-    ),
-    train_speed_kmh=state.speed_kmh,
-    train_current_block_id=current_block.block_id,
-    emergency_decel_ms2=state.config.emergency_decel_ms2,
-)
-print(f"Guardrail result: allowed={result.guardrail.allowed}, event={result.guardrail.event}, "
-      f"redirected_to={result.guardrail.redirected_block_id}")
+# 3. TSR pre-braking: train should reach the restriction close to its limit, not teleport speed down inside it.
+tsr = config.environment.temporary_speed_restrictions[0]
+tsr_start = config.route.block_start_distance_m(tsr.block_id) + tsr.start_position_m
+near_tsr = min(frames, key=lambda f: abs(f.route_position_m - tsr_start))
+assert near_tsr.speed_kmh <= tsr.speed_limit_kmh + 2.0
 
-# 4. Batch mode: generate a small synthetic training dataset
-gen_config = ScenarioGeneratorConfig(n_scenarios=10, random_seed=7)
-config.max_ticks = 60  # keep smoke test fast
-generator = ScenarioGenerator(config, gen_config)
+# 4. RED signal stop/release behavior.
+red_config = load_simulation_config("examples/delhi_agra_corridor.yaml")
+for i, schedule in enumerate(red_config.environment.signal_states):
+    if schedule.signal_id == "SIG-02":
+        red_config.environment.signal_states[i] = SignalStateSchedule(
+            signal_id="SIG-02",
+            timeline=[
+                SignalTimelineEntry(start_time_s=0, aspect=SignalAspect.RED),
+                SignalTimelineEntry(start_time_s=180, aspect=SignalAspect.GREEN),
+            ],
+        )
+red_engine = SimulationEngine(red_config, scenario_id="red_signal_test")
+red_frames = []
+for _ in range(180):
+    red_frames.extend(red_engine.tick())
+boundary = red_config.route.block_start_distance_m("BLK-02")
+assert max(f.route_position_m for f in red_frames) < boundary
+assert any(f.control_reason.startswith("RED_SIGNAL") and f.speed_kmh == 0 for f in red_frames)
+for _ in range(100):
+    red_frames.extend(red_engine.tick())
+assert any(f.route_position_m > boundary for f in red_frames if f.sim_time_s > 180)
+
+# 5. Generate multiple normal/controlled scenarios with labels.
+generator = ScenarioGenerator(config, ScenarioGeneratorConfig(n_scenarios=5, random_seed=7))
 exporter = generator.run()
 df = exporter.to_dataframe()
-print(f"\nBatch generation produced {len(df)} telemetry rows across {gen_config.n_scenarios} scenarios")
-print(df[["scenario_id", "tick", "block_id", "speed_kmh", "signal_aspect", "anomaly_active"]].head(8))
+assert df["scenario_id"].nunique() == 5
+assert df["actual_remaining_time_s"].notna().all()
+assert (df.groupby("scenario_id").tail(1)["actual_remaining_time_s"] == 0).all()
 
-exporter.to_parquet("output/sample_training_data.parquet")
 exporter.to_csv("output/sample_training_data.csv")
-print("\nWrote output/sample_training_data.parquet and .csv")
+exporter.to_parquet("output/sample_training_data.parquet")
+
+print(f"single run: {len(frames)} frames, arrival={frames[-1].sim_time_s:.1f}s")
+print(f"generated {len(df)} labelled rows across 5 scenarios")
+print(df[["scenario_id", "sim_time_s", "current_block_id", "speed_kmh", "weather", "actual_remaining_time_s"]].head())
+print("Component A smoke test passed")
