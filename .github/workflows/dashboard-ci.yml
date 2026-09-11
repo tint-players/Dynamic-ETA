@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - frontend-simulator-dashboard
+      - multi-train-track-stations-v1
   pull_request:
     branches:
       - component-a-simulator-v1
+      - frontend-simulator-dashboard
 
 jobs:
   test:
