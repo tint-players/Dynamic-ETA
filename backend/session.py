@@ -11,7 +11,7 @@ from simulator.dataset import label_completed_journey, label_completed_multi_tra
 from simulator.engine import SimulationEngine
 from simulator.exporters import BatchExporter
 from simulator.models import SimulationConfig, TelemetryFrame
-from simulator.multi_engine import MultiTrainSimulationEngine
+from simulator.network_engine import NetworkSimulationEngine
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
@@ -28,7 +28,7 @@ def _display_path(path: Path) -> str:
 
 def _new_engine(config: SimulationConfig, scenario_id: str):
     if config.additional_train_runs or config.stations or config.dynamic_signalling:
-        return MultiTrainSimulationEngine(config, scenario_id=scenario_id)
+        return NetworkSimulationEngine(config, scenario_id=scenario_id)
     return SimulationEngine(config, scenario_id=scenario_id)
 
 
@@ -51,7 +51,7 @@ class SimulationSession:
 
     @property
     def is_multi_train(self) -> bool:
-        return isinstance(self.engine, MultiTrainSimulationEngine)
+        return isinstance(self.engine, NetworkSimulationEngine)
 
     def snapshots(self) -> list[TelemetryFrame]:
         if self.is_multi_train:
@@ -76,14 +76,9 @@ class SimulationSession:
             return frames
 
     def _export_completed_journey(self) -> dict[str, str]:
-        labelled = (
-            label_completed_multi_train_journey(self.frames)
-            if self.is_multi_train
-            else label_completed_journey(self.frames)
-        )
+        labelled = label_completed_multi_train_journey(self.frames) if self.is_multi_train else label_completed_journey(self.frames)
         exporter = BatchExporter()
         exporter.add(labelled)
-
         stem = f"{self.scenario_id}_{self.session_id[:8]}"
         csv_path = OUTPUT_DIR / f"{stem}.csv"
         parquet_path = OUTPUT_DIR / f"{stem}.parquet"
