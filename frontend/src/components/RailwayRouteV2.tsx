@@ -1,4 +1,4 @@
-import type { SignalAspect, SimulatorConfigViz, TelemetryFrame, TrackBlockViz } from '../types'
+import type { CrossingState, SignalAspect, SimulatorConfigViz, TelemetryFrame, TrackBlockViz } from '../types'
 
 interface Point { x: number; y: number }
 interface Pose extends Point { angleDeg: number }
@@ -105,9 +105,7 @@ function pathBetween(config: SimulatorConfigViz, startM: number, endM: number, t
   const span = Math.max(1, endM - startM)
   const count = Math.max(8, Math.ceil((span / config.route.total_length_m) * samples))
   const points: Point[] = []
-  for (let i = 0; i <= count; i += 1) {
-    points.push(pointAt(config, startM + span * i / count, trackIdx))
-  }
+  for (let i = 0; i <= count; i += 1) points.push(pointAt(config, startM + span * i / count, trackIdx))
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
 }
 
@@ -141,10 +139,11 @@ function displayPose(config: SimulatorConfigViz, frame: TelemetryFrame): Pose {
   return poseAt(config, frame.route_position_m, trackIndex(config, frame.track_id))
 }
 
-export default function RailwayRouteV2({ config, frames, signalStates, selectedTrainId, onSelectTrain }: {
+export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain }: {
   config: SimulatorConfigViz
   frames: TelemetryFrame[]
   signalStates: Record<string, SignalAspect>
+  crossingStates: Record<string, CrossingState>
   selectedTrainId: string
   onSelectTrain: (trainId: string) => void
 }) {
@@ -182,49 +181,28 @@ export default function RailwayRouteV2({ config, frames, signalStates, selectedT
             const b = pointAt(config, xover.route_end_m, toIdx)
             const c = pointAt(config, xover.route_start_m, toIdx)
             const d = pointAt(config, xover.route_end_m, fromIdx)
-            return (
-              <g key={xover.crossover_id} className="svg-crossover">
-                <path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} />
-                <path d={`M ${c.x} ${c.y} L ${d.x} ${d.y}`} />
-                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 12} textAnchor="middle">⇄ {xover.crossover_id}</text>
-              </g>
-            )
+            return <g key={xover.crossover_id} className="svg-crossover"><path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} /><path d={`M ${c.x} ${c.y} L ${d.x} ${d.y}`} /><text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 12} textAnchor="middle">⇄ {xover.crossover_id}</text></g>
           })}
 
           {config.stations.map((station) => {
             const labelOffset = stationLabelOffset(station.station_id)
-            return (
-              <g key={station.station_id} className="svg-station">
-                {station.platforms.map((platform) => {
-                  const idx = trackIndex(config, platform.track_id)
-                  const p = poseAt(config, platform.route_position_m, idx)
-                  const side = idx === 0 ? -1 : 1
-                  return (
-                    <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}>
-                      <rect x="-23" y={side < 0 ? -34 : 22} width="46" height="12" rx="3" />
-                    </g>
-                  )
-                })}
-                {(() => {
-                  const p = poseAt(config, station.platforms[0].route_position_m, 0)
-                  return (
-                    <g transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}>
-                      <text x={labelOffset.x} y={labelOffset.y} textAnchor="middle">▰ {station.station_name}</text>
-                    </g>
-                  )
-                })()}
-              </g>
-            )
+            return <g key={station.station_id} className="svg-station">
+              {station.platforms.map((platform) => {
+                const idx = trackIndex(config, platform.track_id)
+                const p = poseAt(config, platform.route_position_m, idx)
+                const side = idx === 0 ? -1 : 1
+                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x="-23" y={side < 0 ? -34 : 22} width="46" height="12" rx="3" /></g>
+              })}
+              {(() => {
+                const p = poseAt(config, station.platforms[0].route_position_m, 0)
+                return <g transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><text x={labelOffset.x} y={labelOffset.y} textAnchor="middle">▰ {station.station_name}</text></g>
+              })()}
+            </g>
           })}
 
           {blocks.map(({ block }) => {
             const p = pointAt(config, block.route_start_m + block.length_m / 2, 0)
-            return (
-              <g key={block.block_id} className="block-svg-label">
-                <text x={p.x} y={Math.max(22, p.y - 76)} textAnchor="middle">{block.block_id}</text>
-                {block.curve_radius_m && <text x={p.x} y={Math.max(37, p.y - 61)} textAnchor="middle" className="curve-label">{block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m</text>}
-              </g>
-            )
+            return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={Math.max(22, p.y - 76)} textAnchor="middle">{block.block_id}</text>{block.curve_radius_m && <text x={p.x} y={Math.max(37, p.y - 61)} textAnchor="middle" className="curve-label">{block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m</text>}</g>
           })}
 
           {config.environment.temporary_speed_restrictions.map((item) => <path key={item.restriction_id} d={pathBetween(config, item.route_start_m, item.route_end_m, 0)} className="restriction-line tsr-line" />)}
@@ -236,48 +214,24 @@ export default function RailwayRouteV2({ config, frames, signalStates, selectedT
             const aspect = signalStates[signal.signal_id] ?? signalFallback(config, signal.signal_id, simTime)
             const side = signal.direction === 'FORWARD' ? -1 : 1
             const labelY = side * 47
-            return (
-              <g key={signal.signal_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`} className="svg-signal">
-                <line x1="0" y1="0" x2="0" y2={side * 28} />
-                <circle cx="0" cy={side * 34} r="7" className={`svg-signal-light ${aspect.toLowerCase()}`} />
-                <text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-p.angleDeg} 0 ${labelY})`}>{signal.signal_id}</text>
-              </g>
-            )
+            return <g key={signal.signal_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`} className="svg-signal"><line x1="0" y1="0" x2="0" y2={side * 28} /><circle cx="0" cy={side * 34} r="7" className={`svg-signal-light ${aspect.toLowerCase()}`} /><text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-p.angleDeg} 0 ${labelY})`}>{signal.signal_id}</text></g>
           })}
 
           {config.environment.crossings.map((crossing) => {
-            const state = activeAt(crossing.timeline, simTime)?.state ?? 'OPEN_FOR_TRAIN'
+            const fallback = activeAt(crossing.timeline, simTime)?.state ?? 'CLOSED_FOR_TRAIN'
+            const state = crossingStates[crossing.crossing_id] ?? fallback
             const trainMustStop = state === 'CLOSED_FOR_TRAIN'
             const center = centerPoseAt(config, crossing.route_position_m)
             const visualClass = trainMustStop ? 'road-open' : 'road-closed'
             const statusText = trainMustStop ? 'ROAD OPEN · TRAIN STOP' : 'ROAD CLOSED · TRAIN CLEAR'
-            return (
-              <g key={crossing.crossing_id} transform={`translate(${center.x} ${center.y}) rotate(${center.angleDeg})`} className={`svg-crossing ${visualClass}`}>
-                <line className="crossing-road-bed" x1="0" y1="-54" x2="0" y2="54" />
-                <line className="crossing-road-mark" x1="0" y1="-54" x2="0" y2="54" />
-                <line className="crossing-gate" x1="-18" y1="-38" x2="18" y2="-38" />
-                <line className="crossing-gate" x1="-18" y1="38" x2="18" y2="38" />
-                <text x="12" y="-58">{crossing.crossing_id} · {statusText}</text>
-              </g>
-            )
+            return <g key={crossing.crossing_id} transform={`translate(${center.x} ${center.y}) rotate(${center.angleDeg})`} className={`svg-crossing ${visualClass}`}><line className="crossing-road-bed" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-road-mark" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-gate" x1="-18" y1="-38" x2="18" y2="-38" /><line className="crossing-gate" x1="-18" y1="38" x2="18" y2="38" /><text x="12" y="-58">{crossing.crossing_id} · {statusText}</text></g>
           })}
 
           {frames.map((frame, index) => {
             const pose = displayPose(config, frame)
             const reverse = frame.direction === 'REVERSE'
             const selected = frame.train_id === selectedTrainId
-            return (
-              <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
-                <g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body">
-                  <rect x="-22" y="-12" width="42" height="20" rx="5" />
-                  <path d="M 12 -12 L 22 -6 L 22 5 L 12 8 Z" />
-                  <rect x="-12" y="-8" width="8" height="6" rx="1" className="train-window" />
-                  <rect x="-1" y="-8" width="8" height="6" rx="1" className="train-window" />
-                  <circle cx="-11" cy="10" r="3" /><circle cx="11" cy="10" r="3" />
-                </g>
-                <text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text>
-              </g>
-            )
+            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}><g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body"><rect x="-22" y="-12" width="42" height="20" rx="5" /><path d="M 12 -12 L 22 -6 L 22 5 L 12 8 Z" /><rect x="-12" y="-8" width="8" height="6" rx="1" className="train-window" /><rect x="-1" y="-8" width="8" height="6" rx="1" className="train-window" /><circle cx="-11" cy="10" r="3" /><circle cx="11" cy="10" r="3" /></g><text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text></g>
           })}
 
           <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">DELHI SIDE</text>
@@ -290,7 +244,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, selectedT
         <span>platforms and labels follow track slope</span>
         <span>⇄ = physical crossover</span>
         <span>reverse trains stay upright</span>
-        <span className="crossing-legend road-open-legend">● road open = train stop</span>
+        <span className="crossing-legend road-open-legend">● road open = train stop before crossing</span>
         <span className="crossing-legend road-closed-legend">● road closed = train clear</span>
         <span><i className="legend-swatch tsr-swatch" />TSR</span>
         <span><i className="legend-swatch maintenance-swatch" />Maintenance</span>
