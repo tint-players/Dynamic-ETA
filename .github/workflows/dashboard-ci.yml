@@ -1,0 +1,47 @@
+name: Simulator dashboard CI
+
+on:
+  push:
+    branches:
+      - frontend-simulator-dashboard
+  pull_request:
+    branches:
+      - component-a-simulator-v1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run simulator smoke test
+        run: python smoke_test.py
+
+      - name: Run backend tests
+        run: pytest backend/tests -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
