@@ -5,12 +5,17 @@ interface Point {
   y: number
 }
 
+interface Pose extends Point {
+  angleDeg: number
+}
+
 const WIDTH = 1400
 const HEIGHT = 360
 const LEFT = 80
 const RIGHT = WIDTH - 80
 const BASE_Y = 185
 const TRACK_SPACING = 18
+const PATH_SAMPLES = 220
 
 function activeAt<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
   let active: T | undefined
@@ -35,7 +40,7 @@ function curveDelta(block: TrackBlockViz): number {
 function geometry(config: SimulatorConfigViz) {
   const total = config.route.total_length_m
   let y = BASE_Y
-  const blocks = config.route.blocks.map((block) => {
+  return config.route.blocks.map((block) => {
     const x0 = LEFT + (block.route_start_m / total) * (RIGHT - LEFT)
     const x1 = LEFT + (block.route_end_m / total) * (RIGHT - LEFT)
     const y0 = y
@@ -43,36 +48,89 @@ function geometry(config: SimulatorConfigViz) {
     y = y1
     return { block, x0, x1, y0, y1 }
   })
-  return blocks
 }
 
-function pointAt(config: SimulatorConfigViz, routePositionM: number, trackIndex: number): Point {
+function bezierPoint(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
+  const u = 1 - t
+  const uu = u * u
+  const tt = t * t
+  return {
+    x: uu * u * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + tt * t * p3.x,
+    y: uu * u * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + tt * t * p3.y,
+  }
+}
+
+function bezierTangent(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
+  const u = 1 - t
+  return {
+    x:
+      3 * u * u * (p1.x - p0.x) +
+      6 * u * t * (p2.x - p1.x) +
+      3 * t * t * (p3.x - p2.x),
+    y:
+      3 * u * u * (p1.y - p0.y) +
+      6 * u * t * (p2.y - p1.y) +
+      3 * t * t * (p3.y - p2.y),
+  }
+}
+
+function centerPoseAt(config: SimulatorConfigViz, routePositionM: number): Pose {
   const blocks = geometry(config)
   const clamped = Math.max(0, Math.min(routePositionM, config.route.total_length_m))
   const item = blocks.find(({ block }) => clamped <= block.route_end_m) ?? blocks[blocks.length - 1]
   const span = Math.max(1, item.block.length_m)
   const t = Math.max(0, Math.min(1, (clamped - item.block.route_start_m) / span))
-  const smooth = t * t * (3 - 2 * t)
-  const x = item.x0 + (item.x1 - item.x0) * t
-  const y = item.y0 + (item.y1 - item.y0) * smooth
-  const centeredOffset = (trackIndex - (config.route.track_ids.length - 1) / 2) * TRACK_SPACING
-  return { x, y: y + centeredOffset }
+
+  const p0 = { x: item.x0, y: item.y0 }
+  const p3 = { x: item.x1, y: item.y1 }
+  let point: Point
+  let tangent: Point
+
+  if (item.block.curve_direction && item.block.curve_radius_m) {
+    const dx = item.x1 - item.x0
+    const p1 = { x: item.x0 + dx * 0.34, y: item.y0 }
+    const p2 = { x: item.x0 + dx * 0.66, y: item.y1 }
+    point = bezierPoint(p0, p1, p2, p3, t)
+    tangent = bezierTangent(p0, p1, p2, p3, t)
+  } else {
+    point = {
+      x: item.x0 + (item.x1 - item.x0) * t,
+      y: item.y0 + (item.y1 - item.y0) * t,
+    }
+    tangent = { x: item.x1 - item.x0, y: item.y1 - item.y0 }
+  }
+
+  return {
+    ...point,
+    angleDeg: (Math.atan2(tangent.y, tangent.x) * 180) / Math.PI,
+  }
+}
+
+function poseAt(config: SimulatorConfigViz, routePositionM: number, trackIndex: number): Pose {
+  const center = centerPoseAt(config, routePositionM)
+  const angleRad = (center.angleDeg * Math.PI) / 180
+  const offset = (trackIndex - (config.route.track_ids.length - 1) / 2) * TRACK_SPACING
+  const normalX = -Math.sin(angleRad)
+  const normalY = Math.cos(angleRad)
+  return {
+    x: center.x + normalX * offset,
+    y: center.y + normalY * offset,
+    angleDeg: center.angleDeg,
+  }
+}
+
+function pointAt(config: SimulatorConfigViz, routePositionM: number, trackIndex: number): Point {
+  const { x, y } = poseAt(config, routePositionM, trackIndex)
+  return { x, y }
 }
 
 function trackPath(config: SimulatorConfigViz, trackIndex: number): string {
-  const blocks = geometry(config)
-  const centeredOffset = (trackIndex - (config.route.track_ids.length - 1) / 2) * TRACK_SPACING
-  if (!blocks.length) return ''
-  let d = `M ${blocks[0].x0} ${blocks[0].y0 + centeredOffset}`
-  for (const item of blocks) {
-    if (item.block.curve_direction && item.block.curve_radius_m) {
-      const dx = item.x1 - item.x0
-      d += ` C ${item.x0 + dx * 0.34} ${item.y0 + centeredOffset}, ${item.x0 + dx * 0.66} ${item.y1 + centeredOffset}, ${item.x1} ${item.y1 + centeredOffset}`
-    } else {
-      d += ` L ${item.x1} ${item.y1 + centeredOffset}`
-    }
+  const points: Point[] = []
+  for (let i = 0; i <= PATH_SAMPLES; i += 1) {
+    const routeM = (i / PATH_SAMPLES) * config.route.total_length_m
+    points.push(pointAt(config, routeM, trackIndex))
   }
-  return d
+  return points.map((p, index) => `${index === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
 }
 
 function trackIndex(config: SimulatorConfigViz, trackId: string): number {
@@ -80,9 +138,19 @@ function trackIndex(config: SimulatorConfigViz, trackId: string): number {
   return index >= 0 ? index : 0
 }
 
+function segmentPath(config: SimulatorConfigViz, startM: number, endM: number, trackIdx: number): string {
+  const span = Math.max(1, endM - startM)
+  const samples = Math.max(8, Math.ceil((span / config.route.total_length_m) * PATH_SAMPLES))
+  const points: Point[] = []
+  for (let i = 0; i <= samples; i += 1) {
+    points.push(pointAt(config, startM + (i / samples) * span, trackIdx))
+  }
+  return points.map((p, index) => `${index === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
+}
+
 export default function RailwayRouteV2({ config, frame }: { config: SimulatorConfigViz; frame: TelemetryFrame }) {
   const trainTrackIndex = trackIndex(config, config.train.track_id)
-  const trainPoint = pointAt(config, frame.route_position_m, trainTrackIndex)
+  const trainPose = poseAt(config, frame.route_position_m, trainTrackIndex)
   const blocks = geometry(config)
 
   return (
@@ -108,7 +176,9 @@ export default function RailwayRouteV2({ config, frame }: { config: SimulatorCon
 
           {config.route.track_ids.map((id, index) => (
             <g key={id}>
+              <path d={trackPath(config, index)} className="track-ballast-path" />
               <path d={trackPath(config, index)} className="track-bed-path" />
+              <path d={trackPath(config, index)} className="track-sleeper-path" />
               <path d={trackPath(config, index)} className="track-rail-path" />
               <text x={18} y={pointAt(config, 0, index).y + 4} className="track-name">{id}</text>
             </g>
@@ -124,34 +194,32 @@ export default function RailwayRouteV2({ config, frame }: { config: SimulatorCon
                 </text>
                 {block.curve_radius_m && (
                   <text x={mid.x} y={Math.max(51, mid.y - 28)} textAnchor="middle" className="curve-label">
-                    ↪ R{block.curve_radius_m}m · {block.curve_speed_limit_kmh ?? block.speed_limit_kmh} km/h
+                    {block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m · {block.curve_speed_limit_kmh ?? block.speed_limit_kmh} km/h
                   </text>
                 )}
               </g>
             )
           })}
 
-          {config.environment.temporary_speed_restrictions.map((item) => {
-            const a = pointAt(config, item.route_start_m, trainTrackIndex)
-            const b = pointAt(config, item.route_end_m, trainTrackIndex)
-            return (
-              <g key={item.restriction_id}>
-                <line x1={a.x} y1={a.y + 10} x2={b.x} y2={b.y + 10} className="restriction-line tsr-line" />
-                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 + 27} textAnchor="middle" className="restriction-svg-label">TSR {item.speed_limit_kmh}</text>
-              </g>
-            )
-          })}
+          {config.environment.temporary_speed_restrictions.map((item) => (
+            <g key={item.restriction_id}>
+              <path d={segmentPath(config, item.route_start_m, item.route_end_m, trainTrackIndex)} className="restriction-line tsr-line" />
+              {(() => {
+                const mid = pointAt(config, (item.route_start_m + item.route_end_m) / 2, trainTrackIndex)
+                return <text x={mid.x} y={mid.y + 29} textAnchor="middle" className="restriction-svg-label">TSR {item.speed_limit_kmh}</text>
+              })()}
+            </g>
+          ))}
 
-          {config.environment.maintenance_restrictions.map((item) => {
-            const a = pointAt(config, item.route_start_m, trainTrackIndex)
-            const b = pointAt(config, item.route_end_m, trainTrackIndex)
-            return (
-              <g key={item.restriction_id}>
-                <line x1={a.x} y1={a.y + 17} x2={b.x} y2={b.y + 17} className="restriction-line maintenance-line" />
-                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 + 39} textAnchor="middle" className="restriction-svg-label">MNT {item.speed_limit_kmh}</text>
-              </g>
-            )
-          })}
+          {config.environment.maintenance_restrictions.map((item) => (
+            <g key={item.restriction_id}>
+              <path d={segmentPath(config, item.route_start_m, item.route_end_m, trainTrackIndex)} className="restriction-line maintenance-line" />
+              {(() => {
+                const mid = pointAt(config, (item.route_start_m + item.route_end_m) / 2, trainTrackIndex)
+                return <text x={mid.x} y={mid.y + 42} textAnchor="middle" className="restriction-svg-label">MNT {item.speed_limit_kmh}</text>
+              })()}
+            </g>
+          ))}
 
           {config.signals.map((signal) => {
             const index = trackIndex(config, signal.track_id)
@@ -189,12 +257,16 @@ export default function RailwayRouteV2({ config, frame }: { config: SimulatorCon
             )
           })}
 
-          <g transform={`translate(${trainPoint.x} ${trainPoint.y})`} className="svg-train">
-            <rect x="-19" y="-13" width="38" height="22" rx="6" />
-            <path d="M 12 -13 L 20 -6 L 20 5 L 12 9 Z" />
-            <circle cx="-10" cy="11" r="3" />
-            <circle cx="10" cy="11" r="3" />
-            <text x="0" y="-23" textAnchor="middle">{frame.speed_kmh.toFixed(1)} km/h</text>
+          <g transform={`translate(${trainPose.x} ${trainPose.y})`} className="svg-train-position">
+            <g transform={`rotate(${trainPose.angleDeg})`} className="svg-train-body">
+              <rect x="-22" y="-12" width="42" height="20" rx="5" />
+              <path d="M 12 -12 L 22 -6 L 22 5 L 12 8 Z" />
+              <rect x="-12" y="-8" width="8" height="6" rx="1" className="train-window" />
+              <rect x="-1" y="-8" width="8" height="6" rx="1" className="train-window" />
+              <circle cx="-11" cy="10" r="3" />
+              <circle cx="11" cy="10" r="3" />
+            </g>
+            <text x="0" y="-27" textAnchor="middle" className="train-speed-label">{frame.speed_kmh.toFixed(1)} km/h</text>
           </g>
 
           <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">SOURCE</text>
@@ -205,8 +277,8 @@ export default function RailwayRouteV2({ config, frame }: { config: SimulatorCon
       <div className="legend">
         <span><i className="legend-swatch tsr-swatch" />TSR</span>
         <span><i className="legend-swatch maintenance-swatch" />Maintenance</span>
-        <span>parallel rails = separate tracks</span>
-        <span>curved geometry follows block curve metadata</span>
+        <span>parallel rails follow the same centreline geometry</span>
+        <span>train rotates to the live track tangent</span>
         <span>train on {config.train.track_id}</span>
       </div>
     </section>
