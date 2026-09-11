@@ -8,7 +8,7 @@ from backend.main import app
 from backend.session import SessionManager
 from backend.viz import config_for_visualization
 from simulator.engine import SimulationEngine
-from simulator.models import SignalAspect
+from simulator.models import CrossingState, SignalAspect
 from simulator.network_engine_v4 import NetworkSimulationEngineV4
 
 
@@ -60,6 +60,61 @@ def test_dynamic_signals_are_derived_from_track_occupancy():
     down_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-DOWN-01")
     assert engine.sim_time_s >= down_train.departure_time_s
     assert engine.signal_states()["DN-08"] == SignalAspect.RED
+
+
+def test_level_crossing_closes_for_approach_and_stop_target_is_before_road():
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = NetworkSimulationEngineV4(config, scenario_id="crossing")
+    crossing = config.environment.crossings[0]
+    crossing_pos = config.route.block_start_distance_m(crossing.block_id) + crossing.position_in_block_m
+    train = engine.trains[0]
+    for other in engine.trains[1:]:
+        other.completed = True
+    train.route_position_m = crossing_pos - 500
+    train.source_m = train.route_position_m
+    train.destination_m = config.route.total_length_m
+    train.current_track_id = "TRACK-UP"
+    engine._update_crossings()
+    assert engine.crossing_phases()[crossing.crossing_id] == "CLOSING"
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.CLOSED_FOR_TRAIN
+    crossing_targets = [target for target in engine._targets(train) if target.reason == f"CROSSING:{crossing.crossing_id}"]
+    assert len(crossing_targets) == 1
+    assert crossing_targets[0].position_m == crossing_pos - engine.CROSSING_STOP_LINE_M
+
+    engine.sim_time_s += engine.CROSSING_GATE_CLOSING_S
+    engine._update_crossings()
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.OPEN_FOR_TRAIN
+    assert engine.crossing_phases()[crossing.crossing_id] == "PROTECTED"
+
+
+def test_level_crossing_stays_road_closed_until_rear_clearance_and_delay():
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = NetworkSimulationEngineV4(config, scenario_id="clearance")
+    crossing = config.environment.crossings[0]
+    crossing_pos = config.route.block_start_distance_m(crossing.block_id) + crossing.position_in_block_m
+    train = engine.trains[0]
+    for other in engine.trains[1:]:
+        other.completed = True
+    train.current_track_id = "TRACK-UP"
+    train.route_position_m = crossing_pos - 100
+    train.source_m = train.route_position_m
+    train.destination_m = config.route.total_length_m
+    engine._update_crossings()
+    engine.sim_time_s += engine.CROSSING_GATE_CLOSING_S
+    engine._update_crossings()
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.OPEN_FOR_TRAIN
+
+    train.route_position_m = crossing_pos + train.train.length_m + engine.CROSSING_CLEARANCE_MARGIN_M + 1
+    engine._update_crossings()
+    assert engine.crossing_phases()[crossing.crossing_id] == "CLEARING"
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.OPEN_FOR_TRAIN
+    engine.sim_time_s += engine.CROSSING_REOPEN_DELAY_S - 0.1
+    engine._update_crossings()
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.OPEN_FOR_TRAIN
+    engine.sim_time_s += 0.1
+    engine._update_crossings()
+    assert engine.crossing_states()[crossing.crossing_id] == CrossingState.CLOSED_FOR_TRAIN
+    assert engine.crossing_phases()[crossing.crossing_id] == "ROAD_OPEN"
 
 
 def test_three_up_one_down_first_crossover_and_middle_turnaround():
@@ -149,6 +204,8 @@ def test_api_creates_multi_train_session_and_returns_visual_config():
     assert len(payload["initial_frames"]) == 4
     assert payload["initial_frame"]["actual_remaining_time_s"] is None
     assert payload["signal_states"]["UP-03"] == "RED"
+    assert set(payload["crossing_states"]) == {"XING-001", "XING-002"}
+    assert all(state == "CLOSED_FOR_TRAIN" for state in payload["crossing_states"].values())
 
 
 def test_arbitrary_server_path_is_rejected():
