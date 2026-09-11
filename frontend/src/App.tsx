@@ -6,137 +6,82 @@ import type {
   ExportPaths,
   PlaybackState,
   SessionCreateResponse,
-  SimulatorConfigViz,
+  SignalAspect,
   SocketMessage,
   TelemetryFrame,
 } from './types'
 
-const initialPlayback: PlaybackState = {
-  playing: false,
-  playback_speed: 1,
-  complete: false,
-}
+const initialPlayback: PlaybackState = { playing: false, playback_speed: 1, complete: false }
 
-function activeValue<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
-  let active: T | undefined
-  for (const entry of timeline) {
-    if (entry.start_time_s <= simTime) active = entry
-    else break
-  }
-  return active
-}
-
-function transitionEvents(
-  config: SimulatorConfigViz,
-  previous: TelemetryFrame | null,
-  current: TelemetryFrame,
-): DebugEvent[] {
-  if (!previous) {
-    return [{ id: `start-${current.tick}`, time: current.sim_time_s, text: `Simulation ready in ${current.current_block_id}` }]
-  }
-
+function trainEvents(previous: TelemetryFrame | undefined, current: TelemetryFrame): DebugEvent[] {
+  if (!previous) return [{ id: `${current.train_id}-start`, time: current.sim_time_s, text: `${current.train_id} ready on ${current.track_id}` }]
   const events: DebugEvent[] = []
-  const add = (suffix: string, text: string) => {
-    events.push({ id: `${current.tick}-${suffix}`, time: current.sim_time_s, text })
-  }
-
-  if (previous.current_block_id !== current.current_block_id) {
-    add('block', `Entered ${current.current_block_id}`)
-  }
+  const add = (suffix: string, text: string) => events.push({ id: `${current.train_id}-${current.tick}-${suffix}`, time: current.sim_time_s, text })
+  if (previous.current_block_id !== current.current_block_id) add('block', `${current.train_id} entered ${current.current_block_id}`)
   if (previous.control_action !== current.control_action || previous.control_reason !== current.control_reason) {
-    add('control', `${current.control_action}: ${current.control_reason}`)
+    add('control', `${current.train_id}: ${current.control_action} · ${current.control_reason}`)
   }
-  if (previous.speed_kmh > 0.2 && current.speed_kmh <= 0.2) {
-    add('stop', `Train stopped (${current.control_reason})`)
+  if (previous.current_station_id !== current.current_station_id && current.current_station_id) {
+    add('station', `${current.train_id} dwelling at ${current.current_station_id}`)
   }
-  if (previous.speed_kmh <= 0.2 && current.speed_kmh > 0.2) {
-    add('resume', 'Train resumed')
-  }
-
-  for (const schedule of config.environment.signal_states) {
-    const before = activeValue(schedule.timeline, previous.sim_time_s)?.aspect ?? 'GREEN'
-    const after = activeValue(schedule.timeline, current.sim_time_s)?.aspect ?? 'GREEN'
-    if (before !== after) add(`signal-${schedule.signal_id}`, `${schedule.signal_id}: ${before} → ${after}`)
-  }
-
-  for (const crossing of config.environment.crossings) {
-    const before = activeValue(crossing.timeline, previous.sim_time_s)?.state ?? 'OPEN_FOR_TRAIN'
-    const after = activeValue(crossing.timeline, current.sim_time_s)?.state ?? 'OPEN_FOR_TRAIN'
-    if (before !== after) {
-      add(`crossing-${crossing.crossing_id}`, `${crossing.crossing_id}: ${before.replaceAll('_', ' ')} → ${after.replaceAll('_', ' ')}`)
-    }
-  }
-
-  if (current.distance_to_destination_m === 0 && previous.distance_to_destination_m > 0) {
-    add('destination', 'Reached destination')
-  }
+  if (!previous.completed && current.completed) add('destination', `${current.train_id} reached destination`)
   return events
 }
 
 export default function App() {
   const [session, setSession] = useState<SessionCreateResponse | null>(null)
-  const [frame, setFrame] = useState<TelemetryFrame | null>(null)
+  const [frames, setFrames] = useState<TelemetryFrame[]>([])
   const [history, setHistory] = useState<TelemetryFrame[]>([])
   const [events, setEvents] = useState<DebugEvent[]>([])
+  const [signalStates, setSignalStates] = useState<Record<string, SignalAspect>>({})
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
   const [exportPaths, setExportPaths] = useState<ExportPaths | null>(null)
   const [connection, setConnection] = useState('connecting')
   const [error, setError] = useState<string | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
-  const previousFrameRef = useRef<TelemetryFrame | null>(null)
+  const previousFramesRef = useRef<Record<string, TelemetryFrame>>({})
 
   useEffect(() => {
     let cancelled = false
-
     const start = async () => {
       try {
         const created = await createSession()
         if (cancelled) return
         setSession(created)
-        setFrame(created.initial_frame)
-        setHistory([created.initial_frame])
-        setEvents([{ id: 'start-0', time: 0, text: `Simulation ready in ${created.initial_frame.current_block_id}` }])
-        previousFrameRef.current = created.initial_frame
+        setFrames(created.initial_frames)
+        setSignalStates(created.signal_states)
+        const primary = created.initial_frames.find((f) => f.train_id === created.config.train.train_id) ?? created.initial_frame
+        setHistory([primary])
+        setEvents(created.initial_frames.map((f) => ({ id: `${f.train_id}-start`, time: 0, text: `${f.train_id} ready on ${f.track_id}` })))
+        previousFramesRef.current = Object.fromEntries(created.initial_frames.map((f) => [f.train_id, f]))
 
         socketRef.current = connectSimulation(
           created.session_id,
           (message: SocketMessage) => {
-            if (message.type === 'telemetry') {
-              const next = message.frame
-              const isReset = next.tick === 0 && next.sim_time_s === 0 && (previousFrameRef.current?.tick ?? 0) > 0
+            if (message.type === 'telemetry_batch') {
+              const nextFrames = message.frames
+              const isReset = nextFrames.every((f) => f.tick === 0 && f.sim_time_s === 0) && Object.values(previousFramesRef.current).some((f) => f.tick > 0)
+              setFrames(nextFrames)
+              setSignalStates(message.signal_states)
               if (isReset) {
-                setHistory([next])
-                setEvents([{ id: 'reset-0', time: 0, text: 'Simulation reset' }])
+                const primaryReset = nextFrames.find((f) => f.train_id === created.config.train.train_id) ?? nextFrames[0]
+                setHistory(primaryReset ? [primaryReset] : [])
+                setEvents([{ id: 'reset-0', time: 0, text: 'Multi-train simulation reset' }])
                 setExportPaths(null)
               } else {
-                setHistory((items) => {
-                  if (items.at(-1)?.tick === next.tick && items.at(-1)?.sim_time_s === next.sim_time_s) return items
-                  return [...items, next]
-                })
-                const additions = transitionEvents(created.config, previousFrameRef.current, next)
-                if (additions.length) setEvents((items) => [...items, ...additions].slice(-250))
+                const additions = nextFrames.flatMap((next) => trainEvents(previousFramesRef.current[next.train_id], next))
+                if (additions.length) setEvents((items) => [...items, ...additions].slice(-400))
+                const primary = nextFrames.find((f) => f.train_id === created.config.train.train_id)
+                if (primary) setHistory((items) => items.at(-1)?.tick === primary.tick ? items : [...items, primary])
               }
-              previousFrameRef.current = next
-              setFrame(next)
+              previousFramesRef.current = Object.fromEntries(nextFrames.map((f) => [f.train_id, f]))
             } else if (message.type === 'playback_state') {
-              setPlayback({
-                playing: message.playing,
-                playback_speed: message.playback_speed,
-                complete: message.complete,
-              })
+              setPlayback({ playing: message.playing, playback_speed: message.playback_speed, complete: message.complete })
             } else if (message.type === 'export_complete') {
               setExportPaths(message.paths)
-              setEvents((items) => [
-                ...items,
-                {
-                  id: `export-${message.paths.csv}`,
-                  time: previousFrameRef.current?.sim_time_s ?? 0,
-                  text: `Dataset exported: ${message.paths.csv} and ${message.paths.parquet}`,
-                },
-              ].slice(-250))
-            } else if (message.type === 'error') {
-              setError(message.message)
-            }
+              const time = Object.values(previousFramesRef.current)[0]?.sim_time_s ?? 0
+              setEvents((items) => [...items, { id: `export-${message.paths.csv}`, time, text: `Dataset exported: ${message.paths.csv}` }].slice(-400))
+            } else if (message.type === 'error') setError(message.message)
           },
           setConnection,
         )
@@ -147,34 +92,24 @@ export default function App() {
         }
       }
     }
-
     void start()
-    return () => {
-      cancelled = true
-      socketRef.current?.close()
-    }
+    return () => { cancelled = true; socketRef.current?.close() }
   }, [])
 
   if (error && !session) {
-    return (
-      <div className="boot-screen error-screen">
-        <h1>Simulator dashboard could not start</h1>
-        <p>{error}</p>
-        <p>Confirm the FastAPI backend is running on port 8000, then refresh this page.</p>
-      </div>
-    )
+    return <div className="boot-screen error-screen"><h1>Simulator dashboard could not start</h1><p>{error}</p><p>Confirm the FastAPI backend is running on port 8000, then refresh this page.</p></div>
   }
+  if (!session || frames.length === 0) return <div className="boot-screen"><div className="spinner" /><p>Starting multi-train simulator…</p></div>
 
-  if (!session || !frame) {
-    return <div className="boot-screen"><div className="spinner" /><p>Starting simulator session…</p></div>
-  }
-
+  const primaryFrame = frames.find((f) => f.train_id === session.config.train.train_id) ?? frames[0]
   return (
     <>
       {error && <div className="error-toast" onClick={() => setError(null)}>{error}</div>}
       <Dashboard
         config={session.config}
-        frame={frame}
+        frame={primaryFrame}
+        frames={frames}
+        signalStates={signalStates}
         history={history}
         events={events}
         playback={playback}
