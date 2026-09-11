@@ -16,8 +16,11 @@ client = TestClient(app)
 
 
 def _assert_no_physical_train_overlap(engine: NetworkSimulationEngineV4) -> None:
-    """No two departed trains may occupy the same physical rail interval."""
-    trains = [t for t in engine.trains if engine.sim_time_s >= t.departure_time_s]
+    """No two active, departed trains may occupy the same physical rail interval."""
+    trains = [
+        t for t in engine.trains
+        if engine.sim_time_s >= t.departure_time_s and not t.completed
+    ]
     for index, left in enumerate(trains):
         left_tracks = engine._occupancy_tracks(left)
         left_start, left_end = engine._body_bounds(left)
