@@ -1,0 +1,34 @@
+.realistic-route-panel { overflow: hidden; }
+.realistic-route-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 14px 12px; }
+.realistic-route { min-width: 1180px; width: 100%; height: auto; display: block; }
+.block-boundary { stroke: #31445c; stroke-width: 1; stroke-dasharray: 5 7; opacity: .55; }
+.track-bed-path { fill: none; stroke: #1f2937; stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
+.track-rail-path { fill: none; stroke: #d1d5db; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 10; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+.track-name { fill: #8fa2b9; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.block-svg-label text { fill: #e5edf7; font-size: 11px; font-weight: 800; }
+.block-svg-label .block-speed-label { fill: #8fa2b9; font-size: 10px; font-weight: 600; }
+.block-svg-label .curve-label { fill: #7dd3fc; font-size: 10px; font-weight: 700; }
+.restriction-line { stroke-width: 7; stroke-linecap: round; opacity: .95; }
+.tsr-line { stroke: #facc15; }
+.maintenance-line { stroke: #fb923c; }
+.restriction-svg-label { fill: #dbeafe; font-size: 9px; font-weight: 800; }
+.svg-signal line { stroke: #7a8ca3; stroke-width: 2; }
+.svg-signal text { fill: #9fb1c5; font-size: 9px; }
+.svg-signal-light { stroke: #07111b; stroke-width: 2; }
+.svg-signal-light.green { fill: #22c55e; filter: drop-shadow(0 0 5px #22c55e); }
+.svg-signal-light.yellow { fill: #facc15; filter: drop-shadow(0 0 5px #facc15); }
+.svg-signal-light.red { fill: #ef4444; filter: drop-shadow(0 0 5px #ef4444); }
+.svg-crossing line { stroke: #93c5fd; stroke-width: 3; stroke-dasharray: 5 4; }
+.svg-crossing text { fill: #93c5fd; font-size: 10px; font-weight: 700; }
+.svg-crossing.closed line { stroke: #f43f5e; }
+.svg-crossing.closed text { fill: #fda4af; }
+.route-endpoints circle { fill: #cbd5e1; stroke: #0f172a; stroke-width: 2; }
+.svg-train { transition: transform .18s linear; }
+.svg-train rect, .svg-train path { fill: #38bdf8; stroke: #bae6fd; stroke-width: 1; filter: drop-shadow(0 0 8px rgba(56,189,248,.7)); }
+.svg-train circle { fill: #06101c; }
+.svg-train text { fill: #e0f2fe; font-size: 11px; font-weight: 900; paint-order: stroke; stroke: #07111b; stroke-width: 3px; stroke-linejoin: round; }
+.endpoint-svg-label { fill: #75879c; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+
+@media (max-width: 680px) {
+  .realistic-route { min-width: 1050px; }
+}
