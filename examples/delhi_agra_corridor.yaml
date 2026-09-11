@@ -1,6 +1,9 @@
 route:
   route_id: "GT-DELHI-AGRA-01"
   route_name: "Grand Trunk Delhi-Agra Section"
+  track_ids:
+    - "TRACK-UP"
+    - "TRACK-DOWN"
   blocks:
     - block_id: "BLK-01"
       length_m: 2000
@@ -8,70 +11,87 @@ route:
       gradient_percent: 0.2
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-02"
       length_m: 2500
       speed_limit_kmh: 110
       gradient_percent: 0.4
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-03"
       length_m: 1800
       speed_limit_kmh: 130
       gradient_percent: -0.3
       curve_radius_m: 750
       curve_speed_limit_kmh: 80
+      curve_direction: "RIGHT"
     - block_id: "BLK-04"
       length_m: 2200
       speed_limit_kmh: 130
       gradient_percent: 0.0
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-05"
       length_m: 3000
       speed_limit_kmh: 110
       gradient_percent: 0.5
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-06"
       length_m: 2000
       speed_limit_kmh: 100
       gradient_percent: -0.2
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-07"
       length_m: 2400
       speed_limit_kmh: 110
       gradient_percent: 0.1
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
     - block_id: "BLK-08"
       length_m: 2000
       speed_limit_kmh: 110
       gradient_percent: 0.0
       curve_radius_m: null
       curve_speed_limit_kmh: null
+      curve_direction: null
 
 signals:
   - signal_id: "SIG-01"
     protected_block_id: "BLK-01"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-02"
     protected_block_id: "BLK-02"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-03"
     protected_block_id: "BLK-03"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-04"
     protected_block_id: "BLK-04"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-05"
     protected_block_id: "BLK-05"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-06"
     protected_block_id: "BLK-06"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-07"
     protected_block_id: "BLK-07"
+    track_id: "TRACK-UP"
   - signal_id: "SIG-08"
     protected_block_id: "BLK-08"
+    track_id: "TRACK-UP"
 
 train:
   train_id: "TRAIN-12002"
   train_name: "Bhopal Shatabdi"
+  track_id: "TRACK-UP"
   max_speed_kmh: 130
   length_m: 300
   accel_ms2: 0.5
