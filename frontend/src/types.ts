@@ -171,13 +171,14 @@ export interface SessionCreateResponse {
   initial_frame: TelemetryFrame
   initial_frames: TelemetryFrame[]
   signal_states: Record<string, SignalAspect>
+  crossing_states: Record<string, CrossingState>
 }
 
 export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
 export interface ExportPaths { csv: string; parquet: string }
 
 export type SocketMessage =
-  | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect> }
+  | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState> }
   | ({ type: 'playback_state' } & PlaybackState)
   | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }
