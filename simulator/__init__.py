@@ -1,15 +1,17 @@
 from .models import (
     SignalAspect,
     WeatherCondition,
-    AnomalyType,
+    CrossingState,
     TrackBlock,
-    Corridor,
+    Route,
+    Signal,
     TrainConfig,
+    Journey,
     SimulationConfig,
     TelemetryFrame,
 )
 from .engine import SimulationEngine
-from .anomaly import AnomalyInjector, AnomalyRequest, AnomalyResult
+from .dataset import label_completed_journey
 from .exporters import BatchExporter, LiveExporter
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
@@ -17,16 +19,16 @@ from .config_loader import load_simulation_config, simulation_config_from_dict
 __all__ = [
     "SignalAspect",
     "WeatherCondition",
-    "AnomalyType",
+    "CrossingState",
     "TrackBlock",
-    "Corridor",
+    "Route",
+    "Signal",
     "TrainConfig",
+    "Journey",
     "SimulationConfig",
     "TelemetryFrame",
     "SimulationEngine",
-    "AnomalyInjector",
-    "AnomalyRequest",
-    "AnomalyResult",
+    "label_completed_journey",
     "BatchExporter",
     "LiveExporter",
     "ScenarioGenerator",
