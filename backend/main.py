@@ -44,6 +44,12 @@ def _frame_message(frame) -> dict:
     return {"type": "telemetry", "frame": frame.model_dump(mode="json")}
 
 
+def _export_message(session: SimulationSession) -> dict | None:
+    if session.export_paths is None:
+        return None
+    return {"type": "export_complete", "paths": session.export_paths}
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -98,6 +104,12 @@ async def _send_state(websocket: WebSocket, session: SimulationSession) -> None:
     )
 
 
+async def _send_export_if_ready(websocket: WebSocket, session: SimulationSession) -> None:
+    message = _export_message(session)
+    if message is not None:
+        await websocket.send_json(message)
+
+
 async def _handle_command(websocket: WebSocket, session: SimulationSession, payload: dict) -> None:
     try:
         command = PlaybackCommand.model_validate(payload)
@@ -125,6 +137,7 @@ async def _handle_command(websocket: WebSocket, session: SimulationSession, payl
         frames = session.tick()
         if frames:
             await websocket.send_json(_frame_message(frames[-1]))
+        await _send_export_if_ready(websocket, session)
 
     await _send_state(websocket, session)
 
@@ -140,6 +153,7 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
     await websocket.send_json(_frame_message(session.snapshot()))
     await _send_state(websocket, session)
+    await _send_export_if_ready(websocket, session)
 
     try:
         while True:
@@ -156,6 +170,7 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
                         await websocket.send_json(_frame_message(frames[-1]))
                     if session.engine.is_complete:
                         session.playing = False
+                        await _send_export_if_ready(websocket, session)
                         await _send_state(websocket, session)
             else:
                 payload = await websocket.receive_json()
