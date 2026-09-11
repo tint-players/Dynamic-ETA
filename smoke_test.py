@@ -12,9 +12,11 @@ from simulator.models import SignalAspect, SignalStateSchedule, SignalTimelineEn
 
 config = load_simulation_config("examples/delhi_agra_corridor.yaml")
 assert len(config.route.blocks) == 8
-assert len(config.signals) == 8
+assert len(config.route.track_ids) == 2
+assert len(config.signals) == 16
 
-# 1. Full source-to-destination run.
+# 1. Full source-to-destination run using the legacy single-train engine.
+# This remains a regression check for Component A primary-train physics.
 engine = SimulationEngine(config, scenario_id="single_run")
 frames = engine.run()
 assert engine.is_complete
@@ -29,18 +31,18 @@ assert labelled[-1].actual_remaining_time_s == 0
 assert labelled[0].actual_remaining_time_s == labelled[-1].sim_time_s
 assert all(x.actual_remaining_time_s >= y.actual_remaining_time_s for x, y in zip(labelled, labelled[1:]))
 
-# 3. TSR pre-braking: train should reach the restriction close to its limit, not teleport speed down inside it.
+# 3. TSR pre-braking.
 tsr = config.environment.temporary_speed_restrictions[0]
 tsr_start = config.route.block_start_distance_m(tsr.block_id) + tsr.start_position_m
 near_tsr = min(frames, key=lambda f: abs(f.route_position_m - tsr_start))
 assert near_tsr.speed_kmh <= tsr.speed_limit_kmh + 2.0
 
-# 4. RED signal stop/release behavior.
+# 4. RED signal stop/release behavior on the forward/up track.
 red_config = load_simulation_config("examples/delhi_agra_corridor.yaml")
 for i, schedule in enumerate(red_config.environment.signal_states):
-    if schedule.signal_id == "SIG-02":
+    if schedule.signal_id == "UP-02":
         red_config.environment.signal_states[i] = SignalStateSchedule(
-            signal_id="SIG-02",
+            signal_id="UP-02",
             timeline=[
                 SignalTimelineEntry(start_time_s=0, aspect=SignalAspect.RED),
                 SignalTimelineEntry(start_time_s=180, aspect=SignalAspect.GREEN),
