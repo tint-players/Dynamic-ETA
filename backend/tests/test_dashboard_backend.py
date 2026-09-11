@@ -8,6 +8,8 @@ from backend.main import app
 from backend.session import SessionManager
 from backend.viz import config_for_visualization
 from simulator.engine import SimulationEngine
+from simulator.models import SignalAspect
+from simulator.multi_engine import MultiTrainSimulationEngine
 
 
 client = TestClient(app)
@@ -22,58 +24,84 @@ def test_visual_config_uses_backend_route_geometry():
     assert payload["route"]["blocks"][1]["route_start_m"] == 2000
     assert payload["route"]["blocks"][2]["curve_direction"] == "RIGHT"
     assert payload["signals"][1]["route_position_m"] == 2000
-    assert payload["signals"][1]["track_id"] == "TRACK-UP"
-    assert payload["train"]["track_id"] == "TRACK-UP"
+    assert payload["signals"][8]["direction"] == "REVERSE"
+    assert payload["signals"][8]["route_position_m"] == config.route.total_length_m
+    assert len(payload["stations"]) == 4
+    assert len(payload["trains"]) == 4
+    assert payload["dynamic_signalling"] is True
     assert payload["environment"]["temporary_speed_restrictions"][0]["route_start_m"] == 5000
     assert payload["environment"]["temporary_speed_restrictions"][0]["route_end_m"] == 5700
 
 
-def test_reset_reconstructs_initial_engine_state():
+def test_reset_reconstructs_all_initial_train_states():
     manager = SessionManager()
     session = manager.create("delhi_agra_corridor.yaml")
+    assert session.is_multi_train
+    initial_count = len(session.snapshots())
     session.tick()
     session.tick()
     assert session.engine.sim_time_s > 0
-    assert len(session.frames) == 3
+    assert len(session.frames) == initial_count * 3
 
-    frame = session.reset()
+    frames = session.reset()
     assert session.engine.sim_time_s == 0
-    assert frame.sim_time_s == 0
-    assert frame.route_position_m == 0
-    assert frame.speed_kmh == 0
-    assert session.frames == [frame]
+    assert len(frames) == 4
+    assert all(frame.sim_time_s == 0 for frame in frames)
+    assert session.frames == frames
     assert session.export_paths is None
 
 
-def test_playback_rate_never_changes_simulation_telemetry():
+def test_dynamic_signals_are_derived_from_track_occupancy():
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = MultiTrainSimulationEngine(config, scenario_id="signals")
+    states = engine.signal_states()
+    # Lead UP train starts inside BLK-03, so the signal protecting BLK-03 is red.
+    assert states["UP-03"] == SignalAspect.RED
+    # DOWN train has not departed yet, so its starting block is not occupied at t=0.
+    assert states["DN-08"] == SignalAspect.GREEN
+    for _ in range(60):
+        engine.tick()
+    assert engine.trains[-1].active(engine.sim_time_s)
+    assert engine.signal_states()["DN-08"] == SignalAspect.RED
+
+
+def test_multi_train_engine_contains_same_and_opposite_track_runs_and_station_dwells():
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = MultiTrainSimulationEngine(config, scenario_id="multi")
+    assert [train.train.track_id for train in engine.trains].count("TRACK-UP") == 3
+    assert [train.train.track_id for train in engine.trains].count("TRACK-DOWN") == 1
+    assert engine.trains[-1].direction.value == "REVERSE"
+
+    saw_station_dwell = False
+    for _ in range(1800):
+        frames = engine.tick()
+        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames):
+            saw_station_dwell = True
+            break
+    assert saw_station_dwell
+
+
+def test_playback_rate_never_changes_legacy_primary_physics():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     one_x = SimulationEngine(config, scenario_id="same")
     ten_x = SimulationEngine(config, scenario_id="same")
-
     one_frames = [one_x.snapshot()]
     ten_frames = [ten_x.snapshot()]
     while not one_x.is_complete:
         one_frames.extend(one_x.tick())
     while not ten_x.is_complete:
         ten_frames.extend(ten_x.tick())
-
-    assert [f.model_dump(mode="json") for f in one_frames] == [
-        f.model_dump(mode="json") for f in ten_frames
-    ]
+    assert [f.model_dump(mode="json") for f in one_frames] == [f.model_dump(mode="json") for f in ten_frames]
 
 
-def test_completed_dashboard_run_exports_labelled_csv_and_parquet(tmp_path, monkeypatch):
+def test_completed_dashboard_run_exports_each_train_with_labels(tmp_path, monkeypatch):
     monkeypatch.setattr(session_module, "OUTPUT_DIR", tmp_path)
     manager = SessionManager()
     session = manager.create("delhi_agra_corridor.yaml")
-
     while not session.engine.is_complete:
         session.tick()
 
     assert session.export_paths is not None
-    csv_path = Path(__file__).resolve().parents[2] / session.export_paths["csv"]
-    parquet_path = Path(__file__).resolve().parents[2] / session.export_paths["parquet"]
-
     actual_csv = tmp_path / Path(session.export_paths["csv"]).name
     actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
     assert actual_csv.exists()
@@ -81,26 +109,25 @@ def test_completed_dashboard_run_exports_labelled_csv_and_parquet(tmp_path, monk
 
     with actual_csv.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-
     assert len(rows) == len(session.frames)
-    assert float(rows[0]["actual_remaining_time_s"]) == session.frames[-1].sim_time_s
-    assert float(rows[-1]["actual_remaining_time_s"]) == 0.0
-    assert float(rows[-1]["actual_arrival_simulation_s"]) == session.frames[-1].sim_time_s
-    assert csv_path.name == actual_csv.name
-    assert parquet_path.name == actual_parquet.name
+    train_ids = {row["train_id"] for row in rows}
+    assert len(train_ids) == 4
+    for train_id in train_ids:
+        train_rows = [row for row in rows if row["train_id"] == train_id]
+        assert min(float(row["actual_remaining_time_s"]) for row in train_rows) == 0.0
+        assert all(row["actual_arrival_simulation_s"] for row in train_rows)
 
 
-def test_api_creates_session_and_returns_visual_config():
-    response = client.post(
-        "/api/sessions", json={"scenario_name": "delhi_agra_corridor.yaml"}
-    )
+def test_api_creates_multi_train_session_and_returns_visual_config():
+    response = client.post("/api/sessions", json={"scenario_name": "delhi_agra_corridor.yaml"})
     assert response.status_code == 201
     payload = response.json()
     assert payload["session_id"]
     assert payload["scenario_id"].startswith("live-")
     assert payload["config"]["route"]["route_id"] == "GT-DELHI-AGRA-01"
-    assert payload["config"]["route"]["track_ids"] == ["TRACK-UP", "TRACK-DOWN"]
+    assert len(payload["initial_frames"]) == 4
     assert payload["initial_frame"]["actual_remaining_time_s"] is None
+    assert payload["signal_states"]["UP-03"] == "RED"
 
 
 def test_arbitrary_server_path_is_rejected():
