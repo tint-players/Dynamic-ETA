@@ -137,7 +137,7 @@ def test_up06_forced_red_stops_up_train_before_signal():
     blocker = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
 
     for train in engine.trains:
-        if train not in {follower, blocker}:
+        if train is not follower and train is not blocker:
             train.completed = True
 
     follower.departure_time_s = 0
