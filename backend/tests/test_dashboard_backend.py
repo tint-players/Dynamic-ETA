@@ -83,6 +83,99 @@ def test_dynamic_signals_are_derived_from_track_occupancy():
     assert engine.signal_states()["DN-08"] == SignalAspect.RED
 
 
+def test_full_run_never_passes_a_red_signal_seen_by_the_train_controller():
+    """Regression guard: a train must never cross a signal that is RED to it.
+
+    Dashboard signals may turn RED immediately behind a train because that train
+    itself now occupies the protected block. The controller intentionally excludes
+    the train's own occupancy. This check observes the aspect exactly when each
+    train is about to be advanced and fails only if the train crosses a signal
+    that was RED from its own controller perspective.
+    """
+
+    class AuditedEngine(NetworkSimulationEngineV4):
+        def _advance(self, train, dt):
+            old_position = train.route_position_m
+            red_ahead = []
+            if not train.completed and self.sim_time_s >= train.departure_time_s:
+                for signal in self.config.signals:
+                    if signal.track_id != train.current_track_id or signal.direction != train.direction:
+                        continue
+                    signal_position = self._signal_position(signal)
+                    distance = self._ahead(train, signal_position)
+                    if distance is None:
+                        continue
+                    if self.signal_aspect(signal, exclude=train) == SignalAspect.RED:
+                        red_ahead.append((signal.signal_id, signal_position))
+
+            result = super()._advance(train, dt)
+            new_position = train.route_position_m
+            for signal_id, signal_position in red_ahead:
+                crossed = (old_position - signal_position) * train.sign < -1e-6 and (new_position - signal_position) * train.sign > 1e-6
+                assert not crossed, (
+                    f"{train.train.train_id} passed RED {signal_id} at {self.sim_time_s}s: "
+                    f"{old_position:.2f}m -> {new_position:.2f}m across {signal_position:.2f}m"
+                )
+            return result
+
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = AuditedEngine(config, scenario_id="red-signal-audit")
+    for _ in range(7200):
+        if engine.is_complete:
+            break
+        engine.tick()
+    assert engine.is_complete
+
+
+def test_up06_forced_red_stops_up_train_before_signal():
+    """Targeted Farah/BLK-06 guard for the reported red-signal scenario."""
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = NetworkSimulationEngineV4(config, scenario_id="forced-red")
+    signal = next(signal for signal in config.signals if signal.signal_id == "UP-06")
+    signal_position = engine._signal_position(signal)
+    follower = next(t for t in engine.trains if t.train.train_id == "TRAIN-12002")
+    blocker = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
+
+    for train in engine.trains:
+        if train not in {follower, blocker}:
+            train.completed = True
+
+    follower.departure_time_s = 0
+    follower.current_track_id = "TRACK-UP"
+    follower.route_position_m = signal_position - 450.0
+    follower.source_m = follower.route_position_m
+    follower.destination_m = config.route.total_length_m
+    follower.speed_kmh = 90.0
+    follower.station_stops = []
+
+    blocker.departure_time_s = 0
+    blocker.current_track_id = "TRACK-UP"
+    blocker.route_position_m = signal_position + 700.0
+    blocker.source_m = blocker.route_position_m
+    blocker.destination_m = config.route.total_length_m
+    blocker.speed_kmh = 0.0
+    blocker.station_stops = []
+    blocker.track_changes = []
+
+    assert engine.signal_aspect(signal, exclude=follower) == SignalAspect.RED
+    red_targets = [target for target in engine._targets(follower) if target.reason == "RED_SIGNAL:UP-06"]
+    assert len(red_targets) == 1
+    assert red_targets[0].position_m == signal_position
+
+    for _ in range(120):
+        old_position = follower.route_position_m
+        if follower.completed:
+            break
+        engine.tick()
+        assert follower.route_position_m <= signal_position + 1e-6
+        if abs(follower.route_position_m - signal_position) <= 0.02:
+            assert follower.speed_kmh == 0.0
+            break
+        assert follower.route_position_m >= old_position - 1e-6
+    else:
+        raise AssertionError("TRAIN-12002 never reached the UP-06 red-signal stop point")
+
+
 def test_level_crossing_closes_for_approach_and_stop_target_is_before_road():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     engine = NetworkSimulationEngineV4(config, scenario_id="crossing")
