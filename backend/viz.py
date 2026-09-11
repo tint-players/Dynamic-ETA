@@ -94,6 +94,7 @@ def config_for_visualization(config: SimulationConfig) -> dict:
         "route": {
             "route_id": route.route_id,
             "route_name": route.route_name,
+            "track_ids": route.track_ids,
             "total_length_m": route.total_length_m,
             "blocks": blocks,
         },
