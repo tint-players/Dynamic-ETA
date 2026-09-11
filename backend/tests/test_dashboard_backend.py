@@ -1,5 +1,9 @@
+import csv
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+import backend.session as session_module
 from backend.main import app
 from backend.session import SessionManager
 from backend.viz import config_for_visualization
@@ -26,12 +30,15 @@ def test_reset_reconstructs_initial_engine_state():
     session.tick()
     session.tick()
     assert session.engine.sim_time_s > 0
+    assert len(session.frames) == 3
 
     frame = session.reset()
     assert session.engine.sim_time_s == 0
     assert frame.sim_time_s == 0
     assert frame.route_position_m == 0
     assert frame.speed_kmh == 0
+    assert session.frames == [frame]
+    assert session.export_paths is None
 
 
 def test_playback_rate_never_changes_simulation_telemetry():
@@ -49,6 +56,36 @@ def test_playback_rate_never_changes_simulation_telemetry():
     assert [f.model_dump(mode="json") for f in one_frames] == [
         f.model_dump(mode="json") for f in ten_frames
     ]
+
+
+def test_completed_dashboard_run_exports_labelled_csv_and_parquet(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_module, "OUTPUT_DIR", tmp_path)
+    manager = SessionManager()
+    session = manager.create("delhi_agra_corridor.yaml")
+
+    while not session.engine.is_complete:
+        session.tick()
+
+    assert session.export_paths is not None
+    csv_path = Path(__file__).resolve().parents[2] / session.export_paths["csv"]
+    parquet_path = Path(__file__).resolve().parents[2] / session.export_paths["parquet"]
+
+    # export_paths are repo-relative in production; with a monkeypatched temp output,
+    # validate the actual temp files by filename.
+    actual_csv = tmp_path / Path(session.export_paths["csv"]).name
+    actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
+    assert actual_csv.exists()
+    assert actual_parquet.exists()
+
+    with actual_csv.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == len(session.frames)
+    assert float(rows[0]["actual_remaining_time_s"]) == session.frames[-1].sim_time_s
+    assert float(rows[-1]["actual_remaining_time_s"]) == 0.0
+    assert float(rows[-1]["actual_arrival_simulation_s"]) == session.frames[-1].sim_time_s
+    assert csv_path.name == actual_csv.name
+    assert parquet_path.name == actual_parquet.name
 
 
 def test_api_creates_session_and_returns_visual_config():
