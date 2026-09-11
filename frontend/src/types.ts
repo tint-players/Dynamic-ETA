@@ -153,7 +153,13 @@ export interface PlaybackState {
   complete: boolean
 }
 
+export interface ExportPaths {
+  csv: string
+  parquet: string
+}
+
 export type SocketMessage =
   | { type: 'telemetry'; frame: TelemetryFrame }
   | ({ type: 'playback_state' } & PlaybackState)
+  | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }
