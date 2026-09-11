@@ -11,7 +11,7 @@ from .session import SimulationSession, sessions
 from .viz import config_for_visualization
 
 
-app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.1.0")
+app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -40,8 +40,12 @@ def _session_or_404(session_id: str) -> SimulationSession:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _frame_message(frame) -> dict:
-    return {"type": "telemetry", "frame": frame.model_dump(mode="json")}
+def _telemetry_message(session: SimulationSession, frames) -> dict:
+    return {
+        "type": "telemetry_batch",
+        "frames": [frame.model_dump(mode="json") for frame in frames],
+        "signal_states": session.signal_states(),
+    }
 
 
 def _export_message(session: SimulationSession) -> dict | None:
@@ -66,12 +70,15 @@ def create_session(request: CreateSessionRequest) -> dict:
         session = sessions.create(request.scenario_name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    initial_frames = session.snapshots()
     return {
         "session_id": session.session_id,
         "scenario_id": session.scenario_id,
         "scenario_name": session.scenario_name,
         "config": config_for_visualization(session.config),
-        "initial_frame": session.snapshot().model_dump(mode="json"),
+        "initial_frame": initial_frames[0].model_dump(mode="json"),
+        "initial_frames": [frame.model_dump(mode="json") for frame in initial_frames],
+        "signal_states": session.signal_states(),
     }
 
 
@@ -89,19 +96,21 @@ def get_session_config(session_id: str) -> dict:
 @app.post("/api/sessions/{session_id}/reset")
 def reset_session(session_id: str) -> dict:
     session = _session_or_404(session_id)
-    frame = session.reset()
-    return {"session_id": session.session_id, "frame": frame.model_dump(mode="json")}
+    frames = session.reset()
+    return {
+        "session_id": session.session_id,
+        "frames": [frame.model_dump(mode="json") for frame in frames],
+        "signal_states": session.signal_states(),
+    }
 
 
 async def _send_state(websocket: WebSocket, session: SimulationSession) -> None:
-    await websocket.send_json(
-        {
-            "type": "playback_state",
-            "playing": session.playing,
-            "playback_speed": session.playback_speed,
-            "complete": session.engine.is_complete,
-        }
-    )
+    await websocket.send_json({
+        "type": "playback_state",
+        "playing": session.playing,
+        "playback_speed": session.playback_speed,
+        "complete": session.engine.is_complete,
+    })
 
 
 async def _send_export_if_ready(websocket: WebSocket, session: SimulationSession) -> None:
@@ -124,19 +133,17 @@ async def _handle_command(websocket: WebSocket, session: SimulationSession, payl
         session.playing = False
     elif command.command == "set_speed":
         if command.speed not in ALLOWED_PLAYBACK_SPEEDS:
-            await websocket.send_json(
-                {"type": "error", "message": "speed must be one of 0.5, 1, 2, 5, 10"}
-            )
+            await websocket.send_json({"type": "error", "message": "speed must be one of 0.5, 1, 2, 5, 10"})
             return
         session.playback_speed = float(command.speed)
     elif command.command == "reset":
-        frame = session.reset()
-        await websocket.send_json(_frame_message(frame))
+        frames = session.reset()
+        await websocket.send_json(_telemetry_message(session, frames))
     elif command.command == "step":
         session.playing = False
         frames = session.tick()
         if frames:
-            await websocket.send_json(_frame_message(frames[-1]))
+            await websocket.send_json(_telemetry_message(session, frames))
         await _send_export_if_ready(websocket, session)
 
     await _send_state(websocket, session)
@@ -151,15 +158,13 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
         return
 
     await websocket.accept()
-    await websocket.send_json(_frame_message(session.snapshot()))
+    await websocket.send_json(_telemetry_message(session, session.snapshots()))
     await _send_state(websocket, session)
     await _send_export_if_ready(websocket, session)
 
     try:
         while True:
             if session.playing and not session.engine.is_complete:
-                # Playback speed changes wall-clock pacing only. Simulation tick_seconds
-                # remains untouched, preserving identical physics at every UI speed.
                 delay = session.config.simulation.tick_seconds / session.playback_speed
                 try:
                     payload = await asyncio.wait_for(websocket.receive_json(), timeout=delay)
@@ -167,7 +172,7 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
                 except asyncio.TimeoutError:
                     frames = session.tick()
                     if frames:
-                        await websocket.send_json(_frame_message(frames[-1]))
+                        await websocket.send_json(_telemetry_message(session, frames))
                     if session.engine.is_complete:
                         session.playing = False
                         await _send_export_if_ready(websocket, session)
