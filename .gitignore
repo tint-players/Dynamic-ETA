@@ -1,0 +1,30 @@
+# Virtual environments
+ETA/
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated datasets / outputs
+output/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

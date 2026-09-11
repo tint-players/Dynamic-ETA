@@ -1,0 +1,46 @@
+# Example corridor + train definition.
+# Edit this file (or copy it) to define new corridors/trains without touching code.
+
+corridor:
+  corridor_id: "GT-DELHI-AGRA-01"
+  name: "Grand Trunk Delhi-Agra Section"
+  blocks:
+    - block_id: "BLK-01"
+      length_m: 2000
+      max_speed_kmh: 110
+    - block_id: "BLK-02"
+      length_m: 2500
+      max_speed_kmh: 110
+    - block_id: "BLK-03"
+      length_m: 1800
+      max_speed_kmh: 130
+    - block_id: "BLK-04"
+      length_m: 2200
+      max_speed_kmh: 130
+    - block_id: "BLK-05"
+      length_m: 3000
+      max_speed_kmh: 110
+    - block_id: "BLK-06"
+      length_m: 2000
+      max_speed_kmh: 100
+    - block_id: "BLK-07"
+      length_m: 2400
+      max_speed_kmh: 110
+    - block_id: "BLK-08"
+      length_m: 2000
+      max_speed_kmh: 110
+
+trains:
+  - train_id: "TRAIN-12002"
+    name: "Bhopal Shatabdi"
+    start_block_id: "BLK-01"
+    initial_speed_kmh: 80
+    service_decel_ms2: 0.7
+    emergency_decel_ms2: 1.0
+    accel_ms2: 0.5
+
+tick_seconds: 1.0
+max_ticks: 600
+caution_speed_kmh: 30.0
+lookahead_blocks: 4
+random_seed: 42

@@ -1,0 +1,4 @@
+pydantic==2.13.5
+PyYAML==6.0.3
+pandas==3.0.5
+pyarrow==25.0.1
