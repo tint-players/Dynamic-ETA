@@ -1,15 +1,7 @@
 export type SignalAspect = 'GREEN' | 'YELLOW' | 'RED'
 export type WeatherCondition = 'CLEAR' | 'RAIN' | 'HEAVY_RAIN' | 'FOG' | 'HEAVY_FOG'
 export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
-export type CurveDirection = 'LEFT' | 'RIGHT'
-
-export interface TimelineEntry<T extends string> {
-  start_time_s: number
-  aspect?: T
-  state?: T
-  condition?: T
-  visibility_m?: number
-}
+export type TrainDirection = 'FORWARD' | 'REVERSE'
 
 export interface TrackBlockViz {
   block_id: string
@@ -18,7 +10,7 @@ export interface TrackBlockViz {
   gradient_percent: number
   curve_radius_m: number | null
   curve_speed_limit_kmh: number | null
-  curve_direction: CurveDirection | null
+  curve_direction: 'LEFT' | 'RIGHT' | null
   route_start_m: number
   route_end_m: number
 }
@@ -27,6 +19,7 @@ export interface SignalViz {
   signal_id: string
   protected_block_id: string
   track_id: string
+  direction: TrainDirection
   route_position_m: number
 }
 
@@ -57,11 +50,7 @@ export interface SignalSchedule {
 
 export interface WeatherSchedule {
   block_id: string
-  timeline: Array<{
-    start_time_s: number
-    condition: WeatherCondition
-    visibility_m: number
-  }>
+  timeline: Array<{ start_time_s: number; condition: WeatherCondition; visibility_m: number }>
 }
 
 export interface TrainConfigViz {
@@ -75,6 +64,33 @@ export interface TrainConfigViz {
   emergency_decel_ms2: number
 }
 
+export interface StationPlatformViz {
+  platform_id: string
+  track_id: string
+  block_id: string
+  position_in_block_m: number
+  length_m: number
+  route_position_m: number
+}
+
+export interface StationViz {
+  station_id: string
+  station_name: string
+  platforms: StationPlatformViz[]
+}
+
+export interface TrainRunViz {
+  train: TrainConfigViz
+  journey: {
+    source: { block_id: string; position_in_block_m: number }
+    destination: { block_id: string; position_in_block_m: number }
+  }
+  departure_time_s: number
+  station_stops: Array<{ station_id: string; dwell_time_s: number }>
+  source_route_m: number
+  destination_route_m: number
+}
+
 export interface SimulatorConfigViz {
   route: {
     route_id: string
@@ -84,6 +100,9 @@ export interface SimulatorConfigViz {
     blocks: TrackBlockViz[]
   }
   signals: SignalViz[]
+  dynamic_signalling: boolean
+  stations: StationViz[]
+  trains: TrainRunViz[]
   train: TrainConfigViz
   journey: {
     source: { block_id: string; position_in_block_m: number }
@@ -104,6 +123,7 @@ export interface SimulatorConfigViz {
     random_seed: number | null
     braking_safety_margin_m: number
     speed_tolerance_kmh: number
+    train_separation_m: number
   }
 }
 
@@ -112,6 +132,11 @@ export interface TelemetryFrame {
   train_id: string
   tick: number
   sim_time_s: number
+  track_id: string
+  direction: TrainDirection
+  active: boolean
+  completed: boolean
+  current_station_id: string | null
   current_block_id: string
   position_in_block_m: number
   route_position_m: number
@@ -150,6 +175,8 @@ export interface SessionCreateResponse {
   scenario_name: string
   config: SimulatorConfigViz
   initial_frame: TelemetryFrame
+  initial_frames: TelemetryFrame[]
+  signal_states: Record<string, SignalAspect>
 }
 
 export interface PlaybackState {
@@ -164,7 +191,7 @@ export interface ExportPaths {
 }
 
 export type SocketMessage =
-  | { type: 'telemetry'; frame: TelemetryFrame }
+  | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect> }
   | ({ type: 'playback_state' } & PlaybackState)
   | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }
