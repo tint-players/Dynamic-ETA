@@ -19,6 +19,7 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     - A train is removed from active-network occupancy when its journey completes;
       the fleet still retains its completed telemetry record.
     - Level crossings are train-triggered and use a stop line before the road.
+    - RED railway signals use a protected stop line before the signal post.
 
     Level crossings are controlled from the road-user perspective:
     - road open => CLOSED_FOR_TRAIN
@@ -30,6 +31,10 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     CROSSING_GATE_CLOSING_S = 12.0
     CROSSING_CLEARANCE_MARGIN_M = 20.0
     CROSSING_REOPEN_DELAY_S = 5.0
+
+    # Front of train must stop this far before a RED signal post. This is a
+    # simulator protection margin, not a claim about a railway-standard value.
+    SIGNAL_STOP_MARGIN_M = 20.0
 
     CROSSOVER_RESERVATION_APPROACH_M = 650.0
     CROSSOVER_STOP_MARGIN_M = 70.0
@@ -287,16 +292,28 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
 
         adjusted: list[Target] = []
         for target in targets:
-            if not target.reason.startswith("CROSSING:"):
-                adjusted.append(target)
+            if target.reason.startswith("RED_SIGNAL:"):
+                signal_position = target.position_m
+                stop_line = signal_position - train.sign * self.SIGNAL_STOP_MARGIN_M
+                # If the signal became RED after the train already entered the
+                # margin, stop immediately rather than allowing its front to reach
+                # or pass the signal post.
+                if self._ahead(train, stop_line) is None and self._ahead(train, signal_position) is not None:
+                    stop_line = train.route_position_m
+                adjusted.append(Target(stop_line, 0.0, target.reason, True))
                 continue
-            crossing_id = target.reason.split(":", 1)[1]
-            crossing = next(item for item in self.config.environment.crossings if item.crossing_id == crossing_id)
-            crossing_pos = self._crossing_position(crossing)
-            stop_line = crossing_pos - train.sign * self.CROSSING_STOP_LINE_M
-            if self._ahead(train, stop_line) is None and self._ahead(train, crossing_pos) is not None:
-                stop_line = train.route_position_m
-            adjusted.append(Target(stop_line, 0.0, target.reason, True))
+
+            if target.reason.startswith("CROSSING:"):
+                crossing_id = target.reason.split(":", 1)[1]
+                crossing = next(item for item in self.config.environment.crossings if item.crossing_id == crossing_id)
+                crossing_pos = self._crossing_position(crossing)
+                stop_line = crossing_pos - train.sign * self.CROSSING_STOP_LINE_M
+                if self._ahead(train, stop_line) is None and self._ahead(train, crossing_pos) is not None:
+                    stop_line = train.route_position_m
+                adjusted.append(Target(stop_line, 0.0, target.reason, True))
+                continue
+
+            adjusted.append(target)
 
         adjusted.extend(self._separation_targets(train))
         adjusted.extend(self._crossover_hold_targets(train))
