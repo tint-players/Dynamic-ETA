@@ -1,4 +1,5 @@
-import type { ExportPaths, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
+import type { ExportPaths, PlaybackState, SimulatorConfigViz, TelemetryFrame } from '../types'
+import RailwayRouteV2 from './RailwayRouteV2'
 
 export interface DebugEvent {
   id: string
@@ -24,123 +25,7 @@ interface DashboardProps {
 const fmt = (value: number | null | undefined, digits = 1) =>
   value == null ? '—' : value.toFixed(digits)
 
-function activeAt<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
-  let active: T | undefined
-  for (const entry of timeline) {
-    if (entry.start_time_s <= simTime) active = entry
-    else break
-  }
-  return active
-}
-
-function signalAspect(config: SimulatorConfigViz, signalId: string, simTime: number): SignalAspect {
-  const schedule = config.environment.signal_states.find((item) => item.signal_id === signalId)
-  return activeAt(schedule?.timeline ?? [], simTime)?.aspect ?? 'GREEN'
-}
-
-function RailwayRoute({ config, frame }: { config: SimulatorConfigViz; frame: TelemetryFrame }) {
-  const total = config.route.total_length_m
-  const x = (metres: number) => `${(metres / total) * 100}%`
-
-  return (
-    <section className="panel route-panel">
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">Live infrastructure view</span>
-          <h2>{config.route.route_name}</h2>
-        </div>
-        <div className="route-meta">{(total / 1000).toFixed(1)} km total</div>
-      </div>
-      <div className="route-scroll">
-        <div className="route-canvas">
-          <div className="track-line" />
-
-          {config.route.blocks.map((block) => (
-            <div
-              className="block-segment"
-              key={block.block_id}
-              style={{ left: x(block.route_start_m), width: x(block.length_m) }}
-            >
-              <div className="block-label">
-                <strong>{block.block_id}</strong>
-                <span>{block.speed_limit_kmh} km/h</span>
-                {block.curve_speed_limit_kmh != null && <span>curve {block.curve_speed_limit_kmh} km/h</span>}
-              </div>
-            </div>
-          ))}
-
-          {config.environment.temporary_speed_restrictions.map((item) => (
-            <div
-              className="restriction tsr"
-              key={item.restriction_id}
-              style={{ left: x(item.route_start_m), width: x(item.route_end_m - item.route_start_m) }}
-              title={`${item.restriction_id}: ${item.speed_limit_kmh} km/h`}
-            >
-              TSR {item.speed_limit_kmh}
-            </div>
-          ))}
-
-          {config.environment.maintenance_restrictions.map((item) => (
-            <div
-              className="restriction maintenance"
-              key={item.restriction_id}
-              style={{ left: x(item.route_start_m), width: x(item.route_end_m - item.route_start_m) }}
-              title={`${item.restriction_id}: ${item.speed_limit_kmh} km/h`}
-            >
-              MNT {item.speed_limit_kmh}
-            </div>
-          ))}
-
-          {config.signals.map((signal) => {
-            const aspect = signalAspect(config, signal.signal_id, frame.sim_time_s)
-            return (
-              <div
-                className="signal-marker"
-                key={signal.signal_id}
-                style={{ left: x(signal.route_position_m) }}
-                title={`${signal.signal_id} — ${aspect}`}
-              >
-                <span className={`signal-light ${aspect.toLowerCase()}`} />
-                <span>{signal.signal_id}</span>
-              </div>
-            )
-          })}
-
-          {config.environment.crossings.map((crossing) => {
-            const state = activeAt(crossing.timeline, frame.sim_time_s)?.state ?? 'OPEN_FOR_TRAIN'
-            return (
-              <div
-                className={`crossing-marker ${state === 'CLOSED_FOR_TRAIN' ? 'closed' : ''}`}
-                key={crossing.crossing_id}
-                style={{ left: x(crossing.route_position_m) }}
-                title={`${crossing.crossing_id}: ${state}`}
-              >
-                ×
-                <span>{crossing.crossing_id}</span>
-              </div>
-            )
-          })}
-
-          <div className="endpoint source" style={{ left: x(config.journey.source_route_m) }}>SOURCE</div>
-          <div className="endpoint destination" style={{ left: x(config.journey.destination_route_m) }}>DEST</div>
-
-          <div className="train-marker" style={{ left: x(frame.route_position_m) }} title={`${frame.speed_kmh.toFixed(1)} km/h`}>
-            <div className="train-icon">▰</div>
-            <div className="train-caption">{frame.speed_kmh.toFixed(1)} km/h</div>
-          </div>
-        </div>
-      </div>
-      <div className="legend">
-        <span><i className="legend-swatch tsr-swatch" />TSR</span>
-        <span><i className="legend-swatch maintenance-swatch" />Maintenance</span>
-        <span>● signals</span>
-        <span>× crossing</span>
-      </div>
-    </section>
-  )
-}
-
-function SimulationControls({ playback, connection, onPlay, onPause, onReset, onStep, onSpeed }: Omit<DashboardProps, 'config' | 'frame' | 'history' | 'events'>) {
+function SimulationControls({ playback, connection, onPlay, onPause, onReset, onStep, onSpeed }: DashboardProps) {
   const speeds = [0.5, 1, 2, 5, 10]
   return (
     <section className="controls panel">
@@ -178,12 +63,13 @@ function Metric({ label, value, sub }: { label: string; value: string; sub?: str
   )
 }
 
-function TrainStatePanel({ frame }: { frame: TelemetryFrame }) {
+function TrainStatePanel({ frame, config }: { frame: TelemetryFrame; config: SimulatorConfigViz }) {
   return (
     <section className="panel">
       <div className="panel-heading"><h2>Train state</h2><span className="action-badge">{frame.control_action}</span></div>
       <div className="metric-grid">
         <Metric label="Simulation time" value={`${fmt(frame.sim_time_s, 0)} s`} />
+        <Metric label="Track" value={config.train.track_id} />
         <Metric label="Current block" value={frame.current_block_id} sub={`${fmt(frame.position_in_block_m, 0)} m in block`} />
         <Metric label="Speed" value={`${fmt(frame.speed_kmh)} km/h`} />
         <Metric label="Acceleration" value={`${fmt(frame.acceleration_ms2, 2)} m/s²`} />
@@ -243,8 +129,6 @@ function SpeedChart({ history }: { history: TelemetryFrame[] }) {
     const y = height - pad - (value / maxY) * (height - pad * 2)
     return `${x},${y}`
   }
-  const speedPoints = data.map((f) => point(f, f.speed_kmh)).join(' ')
-  const ceilingPoints = data.map((f) => point(f, f.effective_speed_ceiling_kmh)).join(' ')
 
   return (
     <section className="panel chart-panel">
@@ -259,8 +143,8 @@ function SpeedChart({ history }: { history: TelemetryFrame[] }) {
         <text x={4} y={height - pad + 4}>0</text>
         <text x={pad} y={height - 7}>{firstT.toFixed(0)}s</text>
         <text x={width - 65} y={height - 7}>{lastT.toFixed(0)}s</text>
-        <polyline points={ceilingPoints} className="ceiling-polyline" />
-        <polyline points={speedPoints} className="speed-polyline" />
+        <polyline points={data.map((f) => point(f, f.effective_speed_ceiling_kmh)).join(' ')} className="ceiling-polyline" />
+        <polyline points={data.map((f) => point(f, f.speed_kmh)).join(' ')} className="speed-polyline" />
       </svg>
     </section>
   )
@@ -295,15 +179,15 @@ export default function Dashboard(props: DashboardProps) {
         <div className="scenario-card">
           <span>{frame.scenario_id}</span>
           <strong>{config.train.train_name || config.train.train_id}</strong>
-          <small>seed {config.simulation.random_seed ?? '—'}</small>
+          <small>{config.train.track_id} · seed {config.simulation.random_seed ?? '—'}</small>
         </div>
       </header>
 
       <SimulationControls {...props} />
-      <RailwayRoute config={config} frame={frame} />
+      <RailwayRouteV2 config={config} frame={frame} />
 
       <div className="two-column">
-        <TrainStatePanel frame={frame} />
+        <TrainStatePanel frame={frame} config={config} />
         <ConstraintPanel frame={frame} />
       </div>
 
