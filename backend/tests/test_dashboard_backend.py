@@ -9,7 +9,7 @@ from backend.session import SessionManager
 from backend.viz import config_for_visualization
 from simulator.engine import SimulationEngine
 from simulator.models import SignalAspect
-from simulator.network_engine import NetworkSimulationEngine
+from simulator.network_engine_v4 import NetworkSimulationEngineV4
 
 
 client = TestClient(app)
@@ -30,6 +30,7 @@ def test_visual_config_uses_backend_route_geometry():
     assert len(payload["crossovers"]) == 1
     assert payload["crossovers"][0]["from_track_id"] == "TRACK-UP"
     assert payload["crossovers"][0]["to_track_id"] == "TRACK-DOWN"
+    assert payload["trains"][0]["track_changes"][0]["reverse_after_change"] is True
     assert payload["dynamic_signalling"] is True
 
 
@@ -50,39 +51,51 @@ def test_reset_reconstructs_all_initial_train_states():
 
 def test_dynamic_signals_are_derived_from_track_occupancy():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngine(config, scenario_id="signals")
+    engine = NetworkSimulationEngineV4(config, scenario_id="signals")
     states = engine.signal_states()
     assert states["UP-03"] == SignalAspect.RED
     assert states["DN-08"] == SignalAspect.GREEN
-    for _ in range(60): engine.tick()
+    for _ in range(60):
+        engine.tick()
     down_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-DOWN-01")
     assert engine.sim_time_s >= down_train.departure_time_s
     assert engine.signal_states()["DN-08"] == SignalAspect.RED
 
 
-def test_fleet_is_three_up_one_down_and_middle_up_train_changes_track_at_agra():
+def test_three_up_one_down_first_crossover_and_middle_turnaround():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngine(config, scenario_id="multi")
+    engine = NetworkSimulationEngineV4(config, scenario_id="multi")
     assert sum(t.direction.value == "FORWARD" for t in engine.trains) == 3
     assert sum(t.direction.value == "REVERSE" for t in engine.trains) == 1
-    assert [t.train.track_id for t in engine.trains].count("TRACK-UP") == 3
-    assert [t.train.track_id for t in engine.trains].count("TRACK-DOWN") == 1
+    assert sum(t.current_track_id == "TRACK-UP" for t in engine.trains) == 3
+    assert sum(t.current_track_id == "TRACK-DOWN" for t in engine.trains) == 1
 
-    crossover_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
-    assert crossover_train.current_track_id == "TRACK-UP"
-    saw_station_dwell = False
-    changed_track = False
-    for _ in range(2400):
-        frames = engine.tick()
-        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames):
-            saw_station_dwell = True
-        frame = next(f for f in frames if f.train_id == "TRAIN-CROSS-UP")
-        if frame.track_id == "TRACK-DOWN":
-            changed_track = True
+    lead = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
+    middle = next(t for t in engine.trains if t.train.train_id == "TRAIN-12002")
+    follower = next(t for t in engine.trains if t.train.train_id == "TRAIN-FOLLOW-UP")
+
+    lead_crossed = False
+    middle_turned = False
+    for _ in range(7200):
+        if engine.is_complete:
             break
-    assert saw_station_dwell
-    assert changed_track
-    assert "XOVER-AGRA-01" in crossover_train.completed_crossovers
+        frames = engine.tick()
+        lead_frame = next(f for f in frames if f.train_id == "TRAIN-CROSS-UP")
+        middle_frame = next(f for f in frames if f.train_id == "TRAIN-12002")
+        if lead_frame.track_id == "TRACK-DOWN":
+            lead_crossed = True
+            assert lead_frame.direction.value == "FORWARD"
+        if middle_frame.track_id == "TRACK-DOWN" and middle_frame.direction.value == "REVERSE":
+            middle_turned = True
+
+    assert lead_crossed
+    assert middle_turned
+    assert "XOVER-AGRA-01" in lead.completed_crossovers
+    assert "XOVER-AGRA-01" in middle.completed_crossovers
+    assert engine.is_complete
+    assert all(t.completed for t in engine.trains)
+    assert follower.route_position_m == config.route.total_length_m
+    assert middle.route_position_m == 0
 
 
 def test_playback_rate_never_changes_legacy_primary_physics():
@@ -95,14 +108,22 @@ def test_playback_rate_never_changes_legacy_primary_physics():
     assert [f.model_dump(mode="json") for f in one_frames] == [f.model_dump(mode="json") for f in ten_frames]
 
 
-def test_completed_dashboard_run_exports_each_train_with_labels(tmp_path, monkeypatch):
+def test_completed_dashboard_run_exports_only_after_all_trains_finish(tmp_path, monkeypatch):
     monkeypatch.setattr(session_module, "OUTPUT_DIR", tmp_path)
     manager = SessionManager()
     session = manager.create("delhi_agra_corridor.yaml")
+    saw_partial_completion = False
     for _ in range(7200):
-        if session.engine.is_complete: break
+        if session.engine.is_complete:
+            break
         session.tick()
+        completed_count = sum(t.completed for t in session.engine.trains)
+        if 0 < completed_count < len(session.engine.trains):
+            saw_partial_completion = True
+            assert session.export_paths is None
+    assert saw_partial_completion
     assert session.engine.is_complete
+    assert all(t.completed for t in session.engine.trains)
     assert session.export_paths is not None
     actual_csv = tmp_path / Path(session.export_paths["csv"]).name
     actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
