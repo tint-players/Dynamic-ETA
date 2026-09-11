@@ -3,13 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
+from typing import Any
 from uuid import uuid4
 
 from simulator.config_loader import load_simulation_config
-from simulator.dataset import label_completed_journey
+from simulator.dataset import label_completed_journey, label_completed_multi_train_journey
 from simulator.engine import SimulationEngine
 from simulator.exporters import BatchExporter
 from simulator.models import SimulationConfig, TelemetryFrame
+from simulator.multi_engine import MultiTrainSimulationEngine
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
@@ -24,13 +26,19 @@ def _display_path(path: Path) -> str:
         return path.as_posix()
 
 
+def _new_engine(config: SimulationConfig, scenario_id: str):
+    if config.additional_train_runs or config.stations or config.dynamic_signalling:
+        return MultiTrainSimulationEngine(config, scenario_id=scenario_id)
+    return SimulationEngine(config, scenario_id=scenario_id)
+
+
 @dataclass
 class SimulationSession:
     session_id: str
     scenario_id: str
     scenario_name: str
     config: SimulationConfig
-    engine: SimulationEngine
+    engine: Any
     playback_speed: float = 1.0
     playing: bool = False
     lock: Lock = field(default_factory=Lock)
@@ -39,11 +47,24 @@ class SimulationSession:
 
     def __post_init__(self) -> None:
         if not self.frames:
-            self.frames = [self.engine.snapshot()]
+            self.frames = self.snapshots()
+
+    @property
+    def is_multi_train(self) -> bool:
+        return isinstance(self.engine, MultiTrainSimulationEngine)
+
+    def snapshots(self) -> list[TelemetryFrame]:
+        if self.is_multi_train:
+            return self.engine.snapshot_all()
+        return [self.engine.snapshot()]
 
     def snapshot(self) -> TelemetryFrame:
-        with self.lock:
-            return self.engine.snapshot()
+        return self.snapshots()[0]
+
+    def signal_states(self) -> dict[str, str]:
+        if self.is_multi_train:
+            return {key: value.value for key, value in self.engine.signal_states().items()}
+        return {}
 
     def tick(self) -> list[TelemetryFrame]:
         with self.lock:
@@ -55,7 +76,11 @@ class SimulationSession:
             return frames
 
     def _export_completed_journey(self) -> dict[str, str]:
-        labelled = label_completed_journey(self.frames)
+        labelled = (
+            label_completed_multi_train_journey(self.frames)
+            if self.is_multi_train
+            else label_completed_journey(self.frames)
+        )
         exporter = BatchExporter()
         exporter.add(labelled)
 
@@ -64,21 +89,17 @@ class SimulationSession:
         parquet_path = OUTPUT_DIR / f"{stem}.parquet"
         exporter.to_csv(csv_path)
         exporter.to_parquet(parquet_path)
+        return {"csv": _display_path(csv_path), "parquet": _display_path(parquet_path)}
 
-        return {
-            "csv": _display_path(csv_path),
-            "parquet": _display_path(parquet_path),
-        }
-
-    def reset(self) -> TelemetryFrame:
+    def reset(self) -> list[TelemetryFrame]:
         with self.lock:
-            self.engine = SimulationEngine(self.config, scenario_id=self.scenario_id)
+            self.engine = _new_engine(self.config, self.scenario_id)
             self.playing = False
             self.playback_speed = 1.0
-            frame = self.engine.snapshot()
-            self.frames = [frame]
+            frames = self.snapshots()
+            self.frames = list(frames)
             self.export_paths = None
-            return frame
+            return frames
 
 
 class SessionManager:
@@ -91,7 +112,6 @@ class SessionManager:
 
     @staticmethod
     def load_scenario(scenario_name: str) -> SimulationConfig:
-        # Only allow known example basenames. Arbitrary filesystem paths are rejected.
         allowed = {name: EXAMPLES_DIR / name for name in SessionManager.list_scenarios()}
         path = allowed.get(scenario_name)
         if path is None:
@@ -107,7 +127,7 @@ class SessionManager:
             scenario_id=scenario_id,
             scenario_name=scenario_name,
             config=config,
-            engine=SimulationEngine(config, scenario_id=scenario_id),
+            engine=_new_engine(config, scenario_id),
         )
         self._sessions[session_id] = session
         return session
