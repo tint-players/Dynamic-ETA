@@ -64,7 +64,8 @@ function displayPose(config: SimulatorConfigViz, frame: TelemetryFrame): Pose {
   const run = config.trains.find((item) => item.train.train_id === frame.train_id)
   const plan = run?.track_changes[0]
   const crossover = plan ? config.crossovers.find((item) => item.crossover_id === plan.crossover_id) : undefined
-  if (crossover && frame.route_position_m >= crossover.route_start_m && frame.route_position_m <= crossover.route_end_m) {
+  const hasCompletedTurnaround = Boolean(plan?.reverse_after_change && frame.direction === 'REVERSE' && frame.track_id === crossover?.to_track_id)
+  if (crossover && !hasCompletedTurnaround && frame.route_position_m >= crossover.route_start_m && frame.route_position_m <= crossover.route_end_m) {
     const t = (frame.route_position_m - crossover.route_start_m) / Math.max(1, crossover.route_end_m - crossover.route_start_m)
     const from = poseAt(config, frame.route_position_m, trackIndex(config, crossover.from_track_id))
     const to = poseAt(config, frame.route_position_m, trackIndex(config, crossover.to_track_id))
