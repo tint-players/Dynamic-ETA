@@ -13,11 +13,11 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     Safety rules added in v4:
     - A train body, not just its front, determines track occupancy.
     - A train straddling a crossover occupies both connected tracks until its rear
-      has cleared the crossover, even after the runtime track_id has switched.
+      has cleared the crossover, even after runtime track_id switches.
     - Planned crossover moves reserve the conflict zone before entry. Traffic on
       either connected track is held outside the zone until the owner clears it.
-    - Completed trains remain physical obstacles while other trains are still
-      running, preventing a following train from overlapping a stopped train.
+    - A train is removed from active-network occupancy when its journey completes;
+      the fleet still retains its completed telemetry record.
     - Level crossings are train-triggered and use a stop line before the road.
 
     Level crossings are controlled from the road-user perspective:
@@ -62,13 +62,7 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
         return a1 >= b0 - 1e-6 and b1 >= a0 - 1e-6
 
     def _occupancy_tracks(self, train: RuntimeTrain) -> set[str]:
-        """Tracks physically occupied by any part of this train's body.
-
-        The base engine changed track occupancy using only the front position and
-        stopped treating a crossover as dual-track occupancy as soon as the front
-        passed the midpoint. That allowed the rear of a long train to remain on
-        the crossover while another train was released onto the conflicting track.
-        """
+        """Return every track physically occupied by any part of the train body."""
         tracks = {train.current_track_id}
         body_start, body_end = self._body_bounds(train)
         for plan in train.track_changes:
@@ -85,10 +79,10 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
         start = self.config.route.block_start_distance_m(block.block_id)
         end = start + block.length_m
         for train in self.trains:
-            if train is exclude or self.sim_time_s < train.departure_time_s:
+            # completed means the train has exited this simulated corridor; it is
+            # kept in telemetry/fleet history but no longer occupies active track.
+            if train is exclude or train.completed or self.sim_time_s < train.departure_time_s:
                 continue
-            # Completed trains are deliberately retained as physical occupancy
-            # until the network run finishes. They are still drawn on the track.
             if track_id not in self._occupancy_tracks(train):
                 continue
             body_start, body_end = self._body_bounds(train)
@@ -102,7 +96,7 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
         own_tracks = self._occupancy_tracks(train)
 
         for other in self.trains:
-            if other is train or self.sim_time_s < other.departure_time_s:
+            if other is train or other.completed or self.sim_time_s < other.departure_time_s:
                 continue
             if not own_tracks.intersection(self._occupancy_tracks(other)):
                 continue
@@ -112,11 +106,8 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                 continue
 
             if other.direction == train.direction:
-                # route_position_m is the front of both trains. Keep the follower
-                # behind the other train's rear plus the configured separation.
                 safe_pos = other.route_position_m - train.sign * (other.train.length_m + separation)
             else:
-                # Opposing train fronts must not close inside the separation zone.
                 safe_pos = other.route_position_m - train.sign * separation
 
             if self._ahead(train, safe_pos) is not None:
@@ -129,18 +120,10 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     def _train_plan_for_crossover(self, train: RuntimeTrain, crossover_id: str):
         return next((plan for plan in train.track_changes if plan.crossover_id == crossover_id), None)
 
-    def _crossover_body_occupied(self, crossover, exclude: RuntimeTrain | None = None) -> bool:
+    def _train_body_in_crossover(self, train: RuntimeTrain, crossover) -> bool:
         start, end, _ = self._crossover_bounds(crossover)
-        connected = {crossover.from_track_id, crossover.to_track_id}
-        for train in self.trains:
-            if train is exclude or self.sim_time_s < train.departure_time_s:
-                continue
-            if not connected.intersection(self._occupancy_tracks(train)):
-                continue
-            body_start, body_end = self._body_bounds(train)
-            if self._intervals_overlap(body_start, body_end, start, end):
-                return True
-        return False
+        body_start, body_end = self._body_bounds(train)
+        return self._intervals_overlap(body_start, body_end, start, end)
 
     def _update_crossover_reservations(self) -> None:
         for crossover in self.config.crossovers:
@@ -148,21 +131,46 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             owner_id = self._crossover_reservations.get(cid)
             start, end, _ = self._crossover_bounds(crossover)
 
+            # First decide whether an existing owner still legitimately holds the
+            # interlocking. This supports both planned crossover users and normal
+            # trains that happened to already occupy one of the parallel tracks.
             if owner_id is not None:
                 owner = next((t for t in self.trains if t.train.train_id == owner_id), None)
-                if owner is None:
+                keep = False
+                if owner is not None and not owner.completed and self.sim_time_s >= owner.departure_time_s:
+                    if self._train_body_in_crossover(owner, crossover):
+                        keep = True
+                    else:
+                        plan = self._train_plan_for_crossover(owner, cid)
+                        if plan is not None and cid not in owner.completed_crossovers and owner.current_track_id == crossover.from_track_id:
+                            entry = start if owner.sign > 0 else end
+                            distance = (entry - owner.route_position_m) * owner.sign
+                            keep = 0.0 <= distance <= self.CROSSOVER_RESERVATION_APPROACH_M
+                if not keep:
                     self._crossover_reservations[cid] = None
-                else:
-                    body_start, body_end = self._body_bounds(owner)
-                    still_in_zone = self._intervals_overlap(body_start, body_end, start, end)
-                    plan = self._train_plan_for_crossover(owner, cid)
-                    move_completed = cid in owner.completed_crossovers
-                    # Keep reservation while approaching and while any part of the
-                    # owner remains inside the physical conflict zone.
-                    if move_completed and not still_in_zone:
-                        self._crossover_reservations[cid] = None
+                    owner_id = None
+
+            if owner_id is not None:
                 continue
 
+            # An already occupied conflict zone always gets priority. This prevents
+            # assigning a switch movement across a train that is already passing on
+            # one of the connected tracks.
+            occupants: list[RuntimeTrain] = []
+            connected = {crossover.from_track_id, crossover.to_track_id}
+            for train in self.trains:
+                if train.completed or self.sim_time_s < train.departure_time_s:
+                    continue
+                if train.current_track_id not in connected:
+                    continue
+                if self._train_body_in_crossover(train, crossover):
+                    occupants.append(train)
+            if occupants:
+                self._crossover_reservations[cid] = occupants[0].train.train_id
+                continue
+
+            # Otherwise reserve ahead of time for the nearest train that actually
+            # has a route plan to change track at this crossover.
             candidates: list[tuple[float, RuntimeTrain]] = []
             for train in self.trains:
                 if train.completed or self.sim_time_s < train.departure_time_s:
@@ -172,13 +180,10 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                     continue
                 if train.current_track_id != crossover.from_track_id:
                     continue
-
                 entry = start if train.sign > 0 else end
                 distance = (entry - train.route_position_m) * train.sign
-                body_start, body_end = self._body_bounds(train)
-                inside = self._intervals_overlap(body_start, body_end, start, end)
-                if inside or 0.0 <= distance <= self.CROSSOVER_RESERVATION_APPROACH_M:
-                    candidates.append((max(0.0, distance), train))
+                if 0.0 <= distance <= self.CROSSOVER_RESERVATION_APPROACH_M:
+                    candidates.append((distance, train))
 
             if candidates:
                 candidates.sort(key=lambda item: item[0])
@@ -204,8 +209,13 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                 stop_pos = end + self.CROSSOVER_STOP_MARGIN_M
                 zone_ahead = self._ahead(train, end)
 
-            if zone_ahead is not None and self._ahead(train, stop_pos) is not None:
-                targets.append(Target(stop_pos, 0.0, f"CROSSOVER_RESERVED:{crossover.crossover_id}", True))
+            if zone_ahead is None:
+                continue
+            # If reservation is established unusually late, stop at the current
+            # front position rather than allowing the train to enter the zone.
+            if self._ahead(train, stop_pos) is None:
+                stop_pos = train.route_position_m
+            targets.append(Target(stop_pos, 0.0, f"CROSSOVER_RESERVED:{crossover.crossover_id}", True))
         return targets
 
     # ------------------------------------------------------------------
@@ -270,8 +280,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     # Unified target builder
     # ------------------------------------------------------------------
     def _targets(self, train: RuntimeTrain) -> list[Target]:
-        # Keep all base targets except the base train-separation targets. Those
-        # only compared current_track_id and therefore missed crossover conflicts.
         targets = [
             target for target in super()._targets(train)
             if not target.reason.startswith("TRAIN_AHEAD:")
@@ -309,9 +317,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             if not crossed:
                 continue
 
-            # The reservation is established before the move begins. Track id is
-            # switched at the midpoint, while _occupancy_tracks keeps both tracks
-            # occupied until the rear has physically cleared the whole crossover.
             train.current_track_id = crossover.to_track_id
             train.completed_crossovers.add(plan.crossover_id)
             if plan.reverse_after_change:
@@ -374,8 +379,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                     train.dwelling_station_id = nearest.station_id
                     train.dwell_until_s = self.sim_time_s + stop.dwell_time_s
                 else:
-                    # Keep a tiny epsilon before infrastructure stop targets so a
-                    # following tick still sees the target ahead rather than behind.
                     new_pos -= train.sign * 0.01
 
         train.route_position_m = max(0.0, min(self.config.route.total_length_m, new_pos))
