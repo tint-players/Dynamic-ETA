@@ -16,6 +16,14 @@ EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "dashboard_runs"
 
 
+def _display_path(path: Path) -> str:
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 @dataclass
 class SimulationSession:
     session_id: str
@@ -57,10 +65,9 @@ class SimulationSession:
         exporter.to_csv(csv_path)
         exporter.to_parquet(parquet_path)
 
-        repo_root = Path(__file__).resolve().parents[1]
         return {
-            "csv": csv_path.relative_to(repo_root).as_posix(),
-            "parquet": parquet_path.relative_to(repo_root).as_posix(),
+            "csv": _display_path(csv_path),
+            "parquet": _display_path(parquet_path),
         }
 
     def reset(self) -> TelemetryFrame:
