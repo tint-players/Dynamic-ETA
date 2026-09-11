@@ -15,6 +15,24 @@ from simulator.network_engine_v4 import NetworkSimulationEngineV4
 client = TestClient(app)
 
 
+def _assert_no_physical_train_overlap(engine: NetworkSimulationEngineV4) -> None:
+    """No two departed trains may occupy the same physical rail interval."""
+    trains = [t for t in engine.trains if engine.sim_time_s >= t.departure_time_s]
+    for index, left in enumerate(trains):
+        left_tracks = engine._occupancy_tracks(left)
+        left_start, left_end = engine._body_bounds(left)
+        for right in trains[index + 1:]:
+            if not left_tracks.intersection(engine._occupancy_tracks(right)):
+                continue
+            right_start, right_end = engine._body_bounds(right)
+            overlap = min(left_end, right_end) - max(left_start, right_start)
+            assert overlap <= 1e-6, (
+                f"physical overlap at {engine.sim_time_s}s: "
+                f"{left.train.train_id} {left_tracks} [{left_start}, {left_end}] vs "
+                f"{right.train.train_id} {engine._occupancy_tracks(right)} [{right_start}, {right_end}]"
+            )
+
+
 def test_visual_config_uses_backend_route_geometry():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     payload = config_for_visualization(config)
@@ -117,7 +135,34 @@ def test_level_crossing_stays_road_closed_until_rear_clearance_and_delay():
     assert engine.crossing_phases()[crossing.crossing_id] == "ROAD_OPEN"
 
 
-def test_three_up_one_down_first_crossover_and_middle_turnaround():
+def test_crossover_reservation_blocks_conflicting_track_until_full_body_clear():
+    config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
+    engine = NetworkSimulationEngineV4(config, scenario_id="interlocking")
+    crossover = config.crossovers[0]
+    start, end, _ = engine._crossover_bounds(crossover)
+    owner = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
+    down = next(t for t in engine.trains if t.train.train_id == "TRAIN-DOWN-01")
+
+    owner.route_position_m = start - 300
+    owner.source_m = owner.route_position_m
+    down.route_position_m = end + 300
+    down.source_m = down.route_position_m
+    down.departure_time_s = 0
+    engine._update_crossover_reservations()
+
+    assert engine.crossover_reservations()[crossover.crossover_id] == owner.train.train_id
+    holds = [t for t in engine._targets(down) if t.reason == f"CROSSOVER_RESERVED:{crossover.crossover_id}"]
+    assert len(holds) == 1
+    assert holds[0].position_m > end
+
+    owner.route_position_m = end + owner.train.length_m + 1
+    owner.current_track_id = crossover.to_track_id
+    owner.completed_crossovers.add(crossover.crossover_id)
+    engine._update_crossover_reservations()
+    assert engine.crossover_reservations()[crossover.crossover_id] is None
+
+
+def test_three_up_one_down_station_stops_crossovers_and_no_overlap():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     engine = NetworkSimulationEngineV4(config, scenario_id="multi")
     assert sum(t.direction.value == "FORWARD" for t in engine.trains) == 3
@@ -128,21 +173,27 @@ def test_three_up_one_down_first_crossover_and_middle_turnaround():
     lead = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
     middle = next(t for t in engine.trains if t.train.train_id == "TRAIN-12002")
     follower = next(t for t in engine.trains if t.train.train_id == "TRAIN-FOLLOW-UP")
+    assert any(stop.station_id == "MATHURA" for stop in lead.station_stops)
 
     lead_crossed = False
+    lead_mathura_dwell = False
     middle_turned = False
     for _ in range(7200):
         if engine.is_complete:
             break
         frames = engine.tick()
+        _assert_no_physical_train_overlap(engine)
         lead_frame = next(f for f in frames if f.train_id == "TRAIN-CROSS-UP")
         middle_frame = next(f for f in frames if f.train_id == "TRAIN-12002")
+        if lead_frame.current_station_id == "MATHURA":
+            lead_mathura_dwell = True
         if lead_frame.track_id == "TRACK-DOWN":
             lead_crossed = True
             assert lead_frame.direction.value == "FORWARD"
         if middle_frame.track_id == "TRACK-DOWN" and middle_frame.direction.value == "REVERSE":
             middle_turned = True
 
+    assert lead_mathura_dwell
     assert lead_crossed
     assert middle_turned
     assert "XOVER-AGRA-01" in lead.completed_crossovers
