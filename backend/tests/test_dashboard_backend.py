@@ -55,22 +55,27 @@ def test_dynamic_signals_are_derived_from_track_occupancy():
     assert states["UP-03"] == SignalAspect.RED
     assert states["DN-08"] == SignalAspect.GREEN
     for _ in range(60): engine.tick()
-    assert engine.sim_time_s >= engine.trains[2].departure_time_s
+    down_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-DOWN-01")
+    assert engine.sim_time_s >= down_train.departure_time_s
     assert engine.signal_states()["DN-08"] == SignalAspect.RED
 
 
-def test_fleet_is_two_up_two_down_and_crossover_train_changes_track():
+def test_fleet_is_three_up_one_down_and_middle_up_train_changes_track_at_agra():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     engine = NetworkSimulationEngine(config, scenario_id="multi")
-    assert sum(t.direction.value == "FORWARD" for t in engine.trains) == 2
-    assert sum(t.direction.value == "REVERSE" for t in engine.trains) == 2
+    assert sum(t.direction.value == "FORWARD" for t in engine.trains) == 3
+    assert sum(t.direction.value == "REVERSE" for t in engine.trains) == 1
+    assert [t.train.track_id for t in engine.trains].count("TRACK-UP") == 3
+    assert [t.train.track_id for t in engine.trains].count("TRACK-DOWN") == 1
+
     crossover_train = next(t for t in engine.trains if t.train.train_id == "TRAIN-CROSS-UP")
     assert crossover_train.current_track_id == "TRACK-UP"
     saw_station_dwell = False
     changed_track = False
     for _ in range(2400):
         frames = engine.tick()
-        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames): saw_station_dwell = True
+        if any(frame.control_reason.startswith("STATION_DWELL:") for frame in frames):
+            saw_station_dwell = True
         frame = next(f for f in frames if f.train_id == "TRAIN-CROSS-UP")
         if frame.track_id == "TRACK-DOWN":
             changed_track = True
