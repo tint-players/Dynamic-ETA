@@ -27,7 +27,17 @@ jobs:
         run: python smoke_test.py
 
       - name: Run backend tests
-        run: pytest backend/tests -q
+        run: |
+          set -o pipefail
+          pytest backend/tests -q 2>&1 | tee backend-test.log
+
+      - name: Upload backend test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-log
+          path: backend-test.log
+          if-no-files-found: ignore
 
       - name: Set up Node
         uses: actions/setup-node@v4
