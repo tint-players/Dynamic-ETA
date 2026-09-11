@@ -1,4 +1,4 @@
-import type { PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
+import type { ExportPaths, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
 
 export interface DebugEvent {
   id: string
@@ -12,6 +12,7 @@ interface DashboardProps {
   history: TelemetryFrame[]
   events: DebugEvent[]
   playback: PlaybackState
+  exportPaths: ExportPaths | null
   connection: string
   onPlay: () => void
   onPause: () => void
@@ -283,7 +284,7 @@ function EventLog({ events }: { events: DebugEvent[] }) {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { config, frame, history, events, playback } = props
+  const { config, frame, history, events, playback, exportPaths } = props
   return (
     <main className="dashboard">
       <header className="topbar">
@@ -309,7 +310,16 @@ export default function Dashboard(props: DashboardProps) {
       <SpeedChart history={history} />
       <EventLog events={events} />
 
-      {playback.complete && <div className="complete-banner">Journey complete — destination reached at {frame.sim_time_s.toFixed(0)} s</div>}
+      {playback.complete && (
+        <div className="complete-banner">
+          Journey complete — destination reached at {frame.sim_time_s.toFixed(0)} s
+          {exportPaths && (
+            <div>
+              Dataset exported automatically · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}
+            </div>
+          )}
+        </div>
+      )}
     </main>
   )
 }
