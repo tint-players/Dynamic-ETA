@@ -1,46 +1,207 @@
-# Example corridor + train definition.
-# Edit this file (or copy it) to define new corridors/trains without touching code.
-
-corridor:
-  corridor_id: "GT-DELHI-AGRA-01"
-  name: "Grand Trunk Delhi-Agra Section"
+route:
+  route_id: "GT-DELHI-AGRA-01"
+  route_name: "Grand Trunk Delhi-Agra Section"
   blocks:
     - block_id: "BLK-01"
       length_m: 2000
-      max_speed_kmh: 110
+      speed_limit_kmh: 110
+      gradient_percent: 0.2
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-02"
       length_m: 2500
-      max_speed_kmh: 110
+      speed_limit_kmh: 110
+      gradient_percent: 0.4
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-03"
       length_m: 1800
-      max_speed_kmh: 130
+      speed_limit_kmh: 130
+      gradient_percent: -0.3
+      curve_radius_m: 750
+      curve_speed_limit_kmh: 80
     - block_id: "BLK-04"
       length_m: 2200
-      max_speed_kmh: 130
+      speed_limit_kmh: 130
+      gradient_percent: 0.0
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-05"
       length_m: 3000
-      max_speed_kmh: 110
+      speed_limit_kmh: 110
+      gradient_percent: 0.5
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-06"
       length_m: 2000
-      max_speed_kmh: 100
+      speed_limit_kmh: 100
+      gradient_percent: -0.2
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-07"
       length_m: 2400
-      max_speed_kmh: 110
+      speed_limit_kmh: 110
+      gradient_percent: 0.1
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
     - block_id: "BLK-08"
       length_m: 2000
-      max_speed_kmh: 110
+      speed_limit_kmh: 110
+      gradient_percent: 0.0
+      curve_radius_m: null
+      curve_speed_limit_kmh: null
 
-trains:
-  - train_id: "TRAIN-12002"
-    name: "Bhopal Shatabdi"
+signals:
+  - signal_id: "SIG-01"
+    protected_block_id: "BLK-01"
+  - signal_id: "SIG-02"
+    protected_block_id: "BLK-02"
+  - signal_id: "SIG-03"
+    protected_block_id: "BLK-03"
+  - signal_id: "SIG-04"
+    protected_block_id: "BLK-04"
+  - signal_id: "SIG-05"
+    protected_block_id: "BLK-05"
+  - signal_id: "SIG-06"
+    protected_block_id: "BLK-06"
+  - signal_id: "SIG-07"
+    protected_block_id: "BLK-07"
+  - signal_id: "SIG-08"
+    protected_block_id: "BLK-08"
+
+train:
+  train_id: "TRAIN-12002"
+  train_name: "Bhopal Shatabdi"
+  max_speed_kmh: 130
+  length_m: 300
+  accel_ms2: 0.5
+  service_decel_ms2: 0.7
+  emergency_decel_ms2: 1.0
+  initial_state:
     start_block_id: "BLK-01"
-    initial_speed_kmh: 80
-    service_decel_ms2: 0.7
-    emergency_decel_ms2: 1.0
-    accel_ms2: 0.5
+    position_in_block_m: 0
+    initial_speed_kmh: 0
 
-tick_seconds: 1.0
-max_ticks: 600
-caution_speed_kmh: 30.0
-lookahead_blocks: 4
-random_seed: 42
+journey:
+  source:
+    block_id: "BLK-01"
+    position_in_block_m: 0
+  destination:
+    block_id: "BLK-08"
+    position_in_block_m: 2000
+
+environment:
+  weather:
+    - block_id: "BLK-01"
+      timeline:
+        - start_time_s: 0
+          condition: "CLEAR"
+          visibility_m: 10000
+    - block_id: "BLK-02"
+      timeline:
+        - start_time_s: 0
+          condition: "RAIN"
+          visibility_m: 4000
+    - block_id: "BLK-03"
+      timeline:
+        - start_time_s: 0
+          condition: "HEAVY_RAIN"
+          visibility_m: 1800
+    - block_id: "BLK-04"
+      timeline:
+        - start_time_s: 0
+          condition: "CLEAR"
+          visibility_m: 10000
+    - block_id: "BLK-05"
+      timeline:
+        - start_time_s: 0
+          condition: "FOG"
+          visibility_m: 700
+    - block_id: "BLK-06"
+      timeline:
+        - start_time_s: 0
+          condition: "CLEAR"
+          visibility_m: 10000
+    - block_id: "BLK-07"
+      timeline:
+        - start_time_s: 0
+          condition: "CLEAR"
+          visibility_m: 10000
+    - block_id: "BLK-08"
+      timeline:
+        - start_time_s: 0
+          condition: "CLEAR"
+          visibility_m: 10000
+
+  signal_states:
+    - signal_id: "SIG-01"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-02"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-03"
+      timeline:
+        - start_time_s: 0
+          aspect: "YELLOW"
+        - start_time_s: 180
+          aspect: "GREEN"
+    - signal_id: "SIG-04"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-05"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-06"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-07"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+    - signal_id: "SIG-08"
+      timeline:
+        - start_time_s: 0
+          aspect: "GREEN"
+
+  temporary_speed_restrictions:
+    - restriction_id: "TSR-001"
+      block_id: "BLK-03"
+      start_position_m: 500
+      end_position_m: 1200
+      speed_limit_kmh: 50
+      start_time_s: 0
+      end_time_s: null
+
+  maintenance_restrictions:
+    - restriction_id: "MNT-001"
+      block_id: "BLK-06"
+      start_position_m: 400
+      end_position_m: 900
+      speed_limit_kmh: 60
+      start_time_s: 0
+      end_time_s: null
+
+  crossings:
+    - crossing_id: "XING-001"
+      block_id: "BLK-05"
+      position_in_block_m: 1700
+      timeline:
+        - start_time_s: 0
+          state: "OPEN_FOR_TRAIN"
+        - start_time_s: 300
+          state: "CLOSED_FOR_TRAIN"
+        - start_time_s: 360
+          state: "OPEN_FOR_TRAIN"
+
+simulation:
+  tick_seconds: 1.0
+  max_simulation_time_s: 7200
+  random_seed: 42
+  braking_safety_margin_m: 15
+  speed_tolerance_kmh: 0.5
