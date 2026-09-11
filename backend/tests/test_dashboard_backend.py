@@ -9,7 +9,7 @@ from backend.session import SessionManager
 from backend.viz import config_for_visualization
 from simulator.engine import SimulationEngine
 from simulator.models import SignalAspect
-from simulator.network_engine import NetworkSimulationEngine
+from simulator.network_engine_v3 import NetworkSimulationEngineV3
 
 
 client = TestClient(app)
@@ -47,7 +47,7 @@ def test_reset_reconstructs_all_initial_train_states():
 
 def test_dynamic_signals_are_derived_from_track_occupancy():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngine(config, scenario_id="signals")
+    engine = NetworkSimulationEngineV3(config, scenario_id="signals")
     states = engine.signal_states()
     assert states["UP-03"] == SignalAspect.RED
     assert states["DN-08"] == SignalAspect.GREEN
@@ -58,7 +58,7 @@ def test_dynamic_signals_are_derived_from_track_occupancy():
 
 def test_multi_train_engine_contains_same_and_opposite_track_runs_and_station_dwells():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
-    engine = NetworkSimulationEngine(config, scenario_id="multi")
+    engine = NetworkSimulationEngineV3(config, scenario_id="multi")
     assert [train.train.track_id for train in engine.trains].count("TRACK-UP") == 3
     assert [train.train.track_id for train in engine.trains].count("TRACK-DOWN") == 1
     assert engine.trains[-1].direction.value == "REVERSE"
@@ -88,7 +88,21 @@ def test_completed_dashboard_run_exports_each_train_with_labels(tmp_path, monkey
     for _ in range(7200):
         if session.engine.is_complete: break
         session.tick()
-    assert session.engine.is_complete
+    if not session.engine.is_complete:
+        state = [
+            (
+                train.train.train_id,
+                train.route_position_m,
+                train.destination_m,
+                train.speed_kmh,
+                train.completed,
+                train.dwelling_station_id,
+                train.dwell_until_s,
+                sorted(train.served_stations),
+            )
+            for train in session.engine.trains
+        ]
+        raise AssertionError(f"network did not complete: {state}")
     assert session.export_paths is not None
     actual_csv = tmp_path / Path(session.export_paths["csv"]).name
     actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
