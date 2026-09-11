@@ -8,16 +8,21 @@ from .physics import kmh_to_ms, ms_to_kmh, update_velocity
 
 
 class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
-    """Network engine with crossover turnarounds and train-triggered level crossings.
+    """Network engine with safe crossovers, turnarounds and train-triggered level crossings.
+
+    Safety rules added in v4:
+    - A train body, not just its front, determines track occupancy.
+    - A train straddling a crossover occupies both connected tracks until its rear
+      has cleared the crossover, even after the runtime track_id has switched.
+    - Planned crossover moves reserve the conflict zone before entry. Traffic on
+      either connected track is held outside the zone until the owner clears it.
+    - Completed trains remain physical obstacles while other trains are still
+      running, preventing a following train from overlapping a stopped train.
+    - Level crossings are train-triggered and use a stop line before the road.
 
     Level crossings are controlled from the road-user perspective:
     - road open => CLOSED_FOR_TRAIN
     - road closed/protected => OPEN_FOR_TRAIN
-
-    A train entering the approach zone starts a gate-closing delay. Until the
-    road is fully closed the train receives a hard stop target before the road,
-    never on the crossing itself. The road remains closed until the entire train
-    plus a clearance margin has passed, followed by a short reopening delay.
     """
 
     CROSSING_APPROACH_TRIGGER_M = 600.0
@@ -25,6 +30,9 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     CROSSING_GATE_CLOSING_S = 12.0
     CROSSING_CLEARANCE_MARGIN_M = 20.0
     CROSSING_REOPEN_DELAY_S = 5.0
+
+    CROSSOVER_RESERVATION_APPROACH_M = 650.0
+    CROSSOVER_STOP_MARGIN_M = 70.0
 
     def __init__(self, config, scenario_id: str = "default"):
         super().__init__(config, scenario_id=scenario_id)
@@ -36,8 +44,173 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             }
             for crossing in self.config.environment.crossings
         }
+        self._crossover_reservations: dict[str, str | None] = {
+            crossover.crossover_id: None for crossover in self.config.crossovers
+        }
         self._update_crossings()
+        self._update_crossover_reservations()
 
+    # ------------------------------------------------------------------
+    # Shared physical occupancy / train separation
+    # ------------------------------------------------------------------
+    def _body_bounds(self, train: RuntimeTrain) -> tuple[float, float]:
+        a, b = self._body_interval(train)
+        return min(a, b), max(a, b)
+
+    @staticmethod
+    def _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
+        return a1 >= b0 - 1e-6 and b1 >= a0 - 1e-6
+
+    def _occupancy_tracks(self, train: RuntimeTrain) -> set[str]:
+        """Tracks physically occupied by any part of this train's body.
+
+        The base engine changed track occupancy using only the front position and
+        stopped treating a crossover as dual-track occupancy as soon as the front
+        passed the midpoint. That allowed the rear of a long train to remain on
+        the crossover while another train was released onto the conflicting track.
+        """
+        tracks = {train.current_track_id}
+        body_start, body_end = self._body_bounds(train)
+        for plan in train.track_changes:
+            crossover = self._crossovers[plan.crossover_id]
+            start, end, _ = self._crossover_bounds(crossover)
+            if self._intervals_overlap(body_start, body_end, start, end):
+                tracks.update({crossover.from_track_id, crossover.to_track_id})
+        return tracks
+
+    def _block_occupied(self, track_id: str, block_index: int, exclude: RuntimeTrain | None = None) -> bool:
+        if block_index < 0 or block_index >= len(self.config.route.blocks):
+            return False
+        block = self.config.route.blocks[block_index]
+        start = self.config.route.block_start_distance_m(block.block_id)
+        end = start + block.length_m
+        for train in self.trains:
+            if train is exclude or self.sim_time_s < train.departure_time_s:
+                continue
+            # Completed trains are deliberately retained as physical occupancy
+            # until the network run finishes. They are still drawn on the track.
+            if track_id not in self._occupancy_tracks(train):
+                continue
+            body_start, body_end = self._body_bounds(train)
+            if self._intervals_overlap(body_start, body_end, start, end):
+                return True
+        return False
+
+    def _separation_targets(self, train: RuntimeTrain) -> list[Target]:
+        targets: list[Target] = []
+        separation = self.config.simulation.train_separation_m
+        own_tracks = self._occupancy_tracks(train)
+
+        for other in self.trains:
+            if other is train or self.sim_time_s < other.departure_time_s:
+                continue
+            if not own_tracks.intersection(self._occupancy_tracks(other)):
+                continue
+
+            gap = (other.route_position_m - train.route_position_m) * train.sign
+            if gap <= 0:
+                continue
+
+            if other.direction == train.direction:
+                # route_position_m is the front of both trains. Keep the follower
+                # behind the other train's rear plus the configured separation.
+                safe_pos = other.route_position_m - train.sign * (other.train.length_m + separation)
+            else:
+                # Opposing train fronts must not close inside the separation zone.
+                safe_pos = other.route_position_m - train.sign * separation
+
+            if self._ahead(train, safe_pos) is not None:
+                targets.append(Target(safe_pos, 0.0, f"TRAIN_AHEAD:{other.train.train_id}", True))
+        return targets
+
+    # ------------------------------------------------------------------
+    # Crossover interlocking / reservation
+    # ------------------------------------------------------------------
+    def _train_plan_for_crossover(self, train: RuntimeTrain, crossover_id: str):
+        return next((plan for plan in train.track_changes if plan.crossover_id == crossover_id), None)
+
+    def _crossover_body_occupied(self, crossover, exclude: RuntimeTrain | None = None) -> bool:
+        start, end, _ = self._crossover_bounds(crossover)
+        connected = {crossover.from_track_id, crossover.to_track_id}
+        for train in self.trains:
+            if train is exclude or self.sim_time_s < train.departure_time_s:
+                continue
+            if not connected.intersection(self._occupancy_tracks(train)):
+                continue
+            body_start, body_end = self._body_bounds(train)
+            if self._intervals_overlap(body_start, body_end, start, end):
+                return True
+        return False
+
+    def _update_crossover_reservations(self) -> None:
+        for crossover in self.config.crossovers:
+            cid = crossover.crossover_id
+            owner_id = self._crossover_reservations.get(cid)
+            start, end, _ = self._crossover_bounds(crossover)
+
+            if owner_id is not None:
+                owner = next((t for t in self.trains if t.train.train_id == owner_id), None)
+                if owner is None:
+                    self._crossover_reservations[cid] = None
+                else:
+                    body_start, body_end = self._body_bounds(owner)
+                    still_in_zone = self._intervals_overlap(body_start, body_end, start, end)
+                    plan = self._train_plan_for_crossover(owner, cid)
+                    move_completed = cid in owner.completed_crossovers
+                    # Keep reservation while approaching and while any part of the
+                    # owner remains inside the physical conflict zone.
+                    if move_completed and not still_in_zone:
+                        self._crossover_reservations[cid] = None
+                continue
+
+            candidates: list[tuple[float, RuntimeTrain]] = []
+            for train in self.trains:
+                if train.completed or self.sim_time_s < train.departure_time_s:
+                    continue
+                plan = self._train_plan_for_crossover(train, cid)
+                if plan is None or cid in train.completed_crossovers:
+                    continue
+                if train.current_track_id != crossover.from_track_id:
+                    continue
+
+                entry = start if train.sign > 0 else end
+                distance = (entry - train.route_position_m) * train.sign
+                body_start, body_end = self._body_bounds(train)
+                inside = self._intervals_overlap(body_start, body_end, start, end)
+                if inside or 0.0 <= distance <= self.CROSSOVER_RESERVATION_APPROACH_M:
+                    candidates.append((max(0.0, distance), train))
+
+            if candidates:
+                candidates.sort(key=lambda item: item[0])
+                self._crossover_reservations[cid] = candidates[0][1].train.train_id
+
+    def crossover_reservations(self) -> dict[str, str | None]:
+        return dict(self._crossover_reservations)
+
+    def _crossover_hold_targets(self, train: RuntimeTrain) -> list[Target]:
+        targets: list[Target] = []
+        for crossover in self.config.crossovers:
+            owner_id = self._crossover_reservations.get(crossover.crossover_id)
+            if owner_id is None or owner_id == train.train.train_id:
+                continue
+            if train.current_track_id not in {crossover.from_track_id, crossover.to_track_id}:
+                continue
+
+            start, end, _ = self._crossover_bounds(crossover)
+            if train.sign > 0:
+                stop_pos = start - self.CROSSOVER_STOP_MARGIN_M
+                zone_ahead = self._ahead(train, start)
+            else:
+                stop_pos = end + self.CROSSOVER_STOP_MARGIN_M
+                zone_ahead = self._ahead(train, end)
+
+            if zone_ahead is not None and self._ahead(train, stop_pos) is not None:
+                targets.append(Target(stop_pos, 0.0, f"CROSSOVER_RESERVED:{crossover.crossover_id}", True))
+        return targets
+
+    # ------------------------------------------------------------------
+    # Train-triggered level crossings
+    # ------------------------------------------------------------------
     def _crossing_position(self, crossing) -> float:
         return self.config.route.block_start_distance_m(crossing.block_id) + crossing.position_in_block_m
 
@@ -93,8 +266,17 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     def crossing_phases(self) -> dict[str, str]:
         return {crossing_id: str(runtime["phase"]) for crossing_id, runtime in self._crossing_runtime.items()}
 
+    # ------------------------------------------------------------------
+    # Unified target builder
+    # ------------------------------------------------------------------
     def _targets(self, train: RuntimeTrain) -> list[Target]:
-        targets = super()._targets(train)
+        # Keep all base targets except the base train-separation targets. Those
+        # only compared current_track_id and therefore missed crossover conflicts.
+        targets = [
+            target for target in super()._targets(train)
+            if not target.reason.startswith("TRAIN_AHEAD:")
+        ]
+
         adjusted: list[Target] = []
         for target in targets:
             if not target.reason.startswith("CROSSING:"):
@@ -107,8 +289,14 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             if self._ahead(train, stop_line) is None and self._ahead(train, crossing_pos) is not None:
                 stop_line = train.route_position_m
             adjusted.append(Target(stop_line, 0.0, target.reason, True))
+
+        adjusted.extend(self._separation_targets(train))
+        adjusted.extend(self._crossover_hold_targets(train))
         return [target for target in adjusted if self._ahead(train, target.position_m) is not None]
 
+    # ------------------------------------------------------------------
+    # Crossover execution / turnaround
+    # ------------------------------------------------------------------
     def _apply_track_change_v4(self, train: RuntimeTrain, old_pos: float, new_pos: float) -> tuple[str | None, bool]:
         for plan in train.track_changes:
             if plan.crossover_id in train.completed_crossovers:
@@ -121,6 +309,9 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             if not crossed:
                 continue
 
+            # The reservation is established before the move begins. Track id is
+            # switched at the midpoint, while _occupancy_tracks keeps both tracks
+            # occupied until the rear has physically cleared the whole crossover.
             train.current_track_id = crossover.to_track_id
             train.completed_crossovers.add(plan.crossover_id)
             if plan.reverse_after_change:
@@ -183,6 +374,8 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                     train.dwelling_station_id = nearest.station_id
                     train.dwell_until_s = self.sim_time_s + stop.dwell_time_s
                 else:
+                    # Keep a tiny epsilon before infrastructure stop targets so a
+                    # following tick still sees the target ahead rather than behind.
                     new_pos -= train.sign * 0.01
 
         train.route_position_m = max(0.0, min(self.config.route.total_length_m, new_pos))
@@ -203,9 +396,11 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
         if self.is_complete:
             return []
         self._update_crossings()
+        self._update_crossover_reservations()
         dt = self.config.simulation.tick_seconds
         actions = {train.train.train_id: self._advance(train, dt) for train in self.trains}
         self.tick_count += 1
         self.sim_time_s += dt
         self._update_crossings()
+        self._update_crossover_reservations()
         return [self.snapshot_train(train, *actions[train.train.train_id]) for train in self.trains]
