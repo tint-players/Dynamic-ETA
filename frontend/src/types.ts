@@ -43,15 +43,20 @@ export interface CrossingViz {
   timeline: Array<{ start_time_s: number; state: CrossingState }>
 }
 
-export interface SignalSchedule {
-  signal_id: string
-  timeline: Array<{ start_time_s: number; aspect: SignalAspect }>
+export interface CrossoverViz {
+  crossover_id: string
+  block_id: string
+  start_position_m: number
+  end_position_m: number
+  from_track_id: string
+  to_track_id: string
+  route_start_m: number
+  route_end_m: number
+  route_mid_m: number
 }
 
-export interface WeatherSchedule {
-  block_id: string
-  timeline: Array<{ start_time_s: number; condition: WeatherCondition; visibility_m: number }>
-}
+export interface SignalSchedule { signal_id: string; timeline: Array<{ start_time_s: number; aspect: SignalAspect }> }
+export interface WeatherSchedule { block_id: string; timeline: Array<{ start_time_s: number; condition: WeatherCondition; visibility_m: number }> }
 
 export interface TrainConfigViz {
   train_id: string
@@ -73,35 +78,24 @@ export interface StationPlatformViz {
   route_position_m: number
 }
 
-export interface StationViz {
-  station_id: string
-  station_name: string
-  platforms: StationPlatformViz[]
-}
+export interface StationViz { station_id: string; station_name: string; platforms: StationPlatformViz[] }
 
 export interface TrainRunViz {
   train: TrainConfigViz
-  journey: {
-    source: { block_id: string; position_in_block_m: number }
-    destination: { block_id: string; position_in_block_m: number }
-  }
+  journey: { source: { block_id: string; position_in_block_m: number }; destination: { block_id: string; position_in_block_m: number } }
   departure_time_s: number
   station_stops: Array<{ station_id: string; dwell_time_s: number }>
+  track_changes: Array<{ crossover_id: string }>
   source_route_m: number
   destination_route_m: number
 }
 
 export interface SimulatorConfigViz {
-  route: {
-    route_id: string
-    route_name: string
-    track_ids: string[]
-    total_length_m: number
-    blocks: TrackBlockViz[]
-  }
+  route: { route_id: string; route_name: string; track_ids: string[]; total_length_m: number; blocks: TrackBlockViz[] }
   signals: SignalViz[]
   dynamic_signalling: boolean
   stations: StationViz[]
+  crossovers: CrossoverViz[]
   trains: TrainRunViz[]
   train: TrainConfigViz
   journey: {
@@ -179,16 +173,8 @@ export interface SessionCreateResponse {
   signal_states: Record<string, SignalAspect>
 }
 
-export interface PlaybackState {
-  playing: boolean
-  playback_speed: number
-  complete: boolean
-}
-
-export interface ExportPaths {
-  csv: string
-  parquet: string
-}
+export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
+export interface ExportPaths { csv: string; parquet: string }
 
 export type SocketMessage =
   | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect> }
