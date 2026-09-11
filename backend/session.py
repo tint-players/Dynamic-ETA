@@ -66,6 +66,11 @@ class SimulationSession:
             return {key: value.value for key, value in self.engine.signal_states().items()}
         return {}
 
+    def crossing_states(self) -> dict[str, str]:
+        if self.is_multi_train:
+            return {key: value.value for key, value in self.engine.crossing_states().items()}
+        return {}
+
     def tick(self) -> list[TelemetryFrame]:
         with self.lock:
             frames = self.engine.tick()
