@@ -164,6 +164,7 @@ class Crossover(BaseModel):
 
 class TrackChangePlan(BaseModel):
     crossover_id: str
+    reverse_after_change: bool = False
 
 
 class TrainRun(BaseModel):
