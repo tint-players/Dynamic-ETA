@@ -17,9 +17,13 @@ def test_visual_config_uses_backend_route_geometry():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml")
     payload = config_for_visualization(config)
 
+    assert payload["route"]["track_ids"] == ["TRACK-UP", "TRACK-DOWN"]
     assert payload["route"]["blocks"][0]["route_start_m"] == 0
     assert payload["route"]["blocks"][1]["route_start_m"] == 2000
+    assert payload["route"]["blocks"][2]["curve_direction"] == "RIGHT"
     assert payload["signals"][1]["route_position_m"] == 2000
+    assert payload["signals"][1]["track_id"] == "TRACK-UP"
+    assert payload["train"]["track_id"] == "TRACK-UP"
     assert payload["environment"]["temporary_speed_restrictions"][0]["route_start_m"] == 5000
     assert payload["environment"]["temporary_speed_restrictions"][0]["route_end_m"] == 5700
 
@@ -70,8 +74,6 @@ def test_completed_dashboard_run_exports_labelled_csv_and_parquet(tmp_path, monk
     csv_path = Path(__file__).resolve().parents[2] / session.export_paths["csv"]
     parquet_path = Path(__file__).resolve().parents[2] / session.export_paths["parquet"]
 
-    # export_paths are repo-relative in production; with a monkeypatched temp output,
-    # validate the actual temp files by filename.
     actual_csv = tmp_path / Path(session.export_paths["csv"]).name
     actual_parquet = tmp_path / Path(session.export_paths["parquet"]).name
     assert actual_csv.exists()
@@ -97,6 +99,7 @@ def test_api_creates_session_and_returns_visual_config():
     assert payload["session_id"]
     assert payload["scenario_id"].startswith("live-")
     assert payload["config"]["route"]["route_id"] == "GT-DELHI-AGRA-01"
+    assert payload["config"]["route"]["track_ids"] == ["TRACK-UP", "TRACK-DOWN"]
     assert payload["initial_frame"]["actual_remaining_time_s"] is None
 
 
