@@ -2,14 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { connectSimulation, createSession, sendCommand } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
-import type {
-  ExportPaths,
-  PlaybackState,
-  SessionCreateResponse,
-  SignalAspect,
-  SocketMessage,
-  TelemetryFrame,
-} from './types'
+import type { ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
 
 const initialPlayback: PlaybackState = { playing: false, playback_speed: 1, complete: false }
 
@@ -18,12 +11,9 @@ function trainEvents(previous: TelemetryFrame | undefined, current: TelemetryFra
   const events: DebugEvent[] = []
   const add = (suffix: string, text: string) => events.push({ id: `${current.train_id}-${current.tick}-${suffix}`, time: current.sim_time_s, text })
   if (previous.current_block_id !== current.current_block_id) add('block', `${current.train_id} entered ${current.current_block_id}`)
-  if (previous.control_action !== current.control_action || previous.control_reason !== current.control_reason) {
-    add('control', `${current.train_id}: ${current.control_action} · ${current.control_reason}`)
-  }
-  if (previous.current_station_id !== current.current_station_id && current.current_station_id) {
-    add('station', `${current.train_id} dwelling at ${current.current_station_id}`)
-  }
+  if (previous.track_id !== current.track_id) add('track', `${current.train_id}: ${previous.track_id} → ${current.track_id}`)
+  if (previous.control_action !== current.control_action || previous.control_reason !== current.control_reason) add('control', `${current.train_id}: ${current.control_action} · ${current.control_reason}`)
+  if (previous.current_station_id !== current.current_station_id && current.current_station_id) add('station', `${current.train_id} dwelling at ${current.current_station_id}`)
   if (!previous.completed && current.completed) add('destination', `${current.train_id} reached destination`)
   return events
 }
@@ -31,7 +21,8 @@ function trainEvents(previous: TelemetryFrame | undefined, current: TelemetryFra
 export default function App() {
   const [session, setSession] = useState<SessionCreateResponse | null>(null)
   const [frames, setFrames] = useState<TelemetryFrame[]>([])
-  const [history, setHistory] = useState<TelemetryFrame[]>([])
+  const [historyByTrain, setHistoryByTrain] = useState<Record<string, TelemetryFrame[]>>({})
+  const [selectedTrainId, setSelectedTrainId] = useState<string>('')
   const [events, setEvents] = useState<DebugEvent[]>([])
   const [signalStates, setSignalStates] = useState<Record<string, SignalAspect>>({})
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
@@ -50,8 +41,9 @@ export default function App() {
         setSession(created)
         setFrames(created.initial_frames)
         setSignalStates(created.signal_states)
-        const primary = created.initial_frames.find((f) => f.train_id === created.config.train.train_id) ?? created.initial_frame
-        setHistory([primary])
+        const initialSelected = created.config.train.train_id
+        setSelectedTrainId(initialSelected)
+        setHistoryByTrain(Object.fromEntries(created.initial_frames.map((f) => [f.train_id, [f]])))
         setEvents(created.initial_frames.map((f) => ({ id: `${f.train_id}-start`, time: 0, text: `${f.train_id} ready on ${f.track_id}` })))
         previousFramesRef.current = Object.fromEntries(created.initial_frames.map((f) => [f.train_id, f]))
 
@@ -64,15 +56,20 @@ export default function App() {
               setFrames(nextFrames)
               setSignalStates(message.signal_states)
               if (isReset) {
-                const primaryReset = nextFrames.find((f) => f.train_id === created.config.train.train_id) ?? nextFrames[0]
-                setHistory(primaryReset ? [primaryReset] : [])
+                setHistoryByTrain(Object.fromEntries(nextFrames.map((f) => [f.train_id, [f]])))
                 setEvents([{ id: 'reset-0', time: 0, text: 'Multi-train simulation reset' }])
                 setExportPaths(null)
               } else {
                 const additions = nextFrames.flatMap((next) => trainEvents(previousFramesRef.current[next.train_id], next))
                 if (additions.length) setEvents((items) => [...items, ...additions].slice(-400))
-                const primary = nextFrames.find((f) => f.train_id === created.config.train.train_id)
-                if (primary) setHistory((items) => items.at(-1)?.tick === primary.tick ? items : [...items, primary])
+                setHistoryByTrain((current) => {
+                  const updated = { ...current }
+                  for (const next of nextFrames) {
+                    const history = updated[next.train_id] ?? []
+                    updated[next.train_id] = history.at(-1)?.tick === next.tick ? history : [...history, next]
+                  }
+                  return updated
+                })
               }
               previousFramesRef.current = Object.fromEntries(nextFrames.map((f) => [f.train_id, f]))
             } else if (message.type === 'playback_state') {
@@ -96,21 +93,22 @@ export default function App() {
     return () => { cancelled = true; socketRef.current?.close() }
   }, [])
 
-  if (error && !session) {
-    return <div className="boot-screen error-screen"><h1>Simulator dashboard could not start</h1><p>{error}</p><p>Confirm the FastAPI backend is running on port 8000, then refresh this page.</p></div>
-  }
+  if (error && !session) return <div className="boot-screen error-screen"><h1>Simulator dashboard could not start</h1><p>{error}</p><p>Confirm the FastAPI backend is running on port 8000, then refresh this page.</p></div>
   if (!session || frames.length === 0) return <div className="boot-screen"><div className="spinner" /><p>Starting multi-train simulator…</p></div>
 
-  const primaryFrame = frames.find((f) => f.train_id === session.config.train.train_id) ?? frames[0]
+  const selectedFrame = frames.find((f) => f.train_id === selectedTrainId) ?? frames[0]
+  const selectedHistory = historyByTrain[selectedFrame.train_id] ?? [selectedFrame]
   return (
     <>
       {error && <div className="error-toast" onClick={() => setError(null)}>{error}</div>}
       <Dashboard
         config={session.config}
-        frame={primaryFrame}
+        frame={selectedFrame}
         frames={frames}
+        selectedTrainId={selectedFrame.train_id}
+        onSelectTrain={setSelectedTrainId}
         signalStates={signalStates}
-        history={history}
+        history={selectedHistory}
         events={events}
         playback={playback}
         exportPaths={exportPaths}
