@@ -1,141 +1,288 @@
-"""
-Core data models for the railway telemetry simulator.
-
-These define the *shape* of everything the simulator works with:
-tracks, trains, weather/signal state, and the telemetry frames it emits.
-
-Built on Pydantic so that:
-  - track/train definitions can be loaded from YAML/JSON/dict interchangeably
-  - bad configs fail fast with a clear validation error, instead of silently
-    producing garbage physics later
-  - new fields can be added without breaking existing configs (just give
-    new fields sensible defaults)
-"""
-
 from __future__ import annotations
 
-from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-
-# --------------------------------------------------------------------------
-# Enums — the fixed vocabularies used across the simulator
-# --------------------------------------------------------------------------
 
 class SignalAspect(str, Enum):
     GREEN = "GREEN"
     YELLOW = "YELLOW"
-    DOUBLE_YELLOW = "DOUBLE_YELLOW"
     RED = "RED"
 
 
 class WeatherCondition(str, Enum):
     CLEAR = "CLEAR"
     RAIN = "RAIN"
+    HEAVY_RAIN = "HEAVY_RAIN"
+    FOG = "FOG"
     HEAVY_FOG = "HEAVY_FOG"
 
 
-class AnomalyType(str, Enum):
-    SIGNAL_ASPECT_CHANGE = "SIGNAL_ASPECT_CHANGE"
-    WEATHER_MODIFIER = "WEATHER_MODIFIER"
-    TEMPORARY_SPEED_RESTRICTION = "TEMPORARY_SPEED_RESTRICTION"
-    BLOCK_MAINTENANCE_HOLD = "BLOCK_MAINTENANCE_HOLD"
+class CrossingState(str, Enum):
+    OPEN_FOR_TRAIN = "OPEN_FOR_TRAIN"
+    CLOSED_FOR_TRAIN = "CLOSED_FOR_TRAIN"
 
-
-# --------------------------------------------------------------------------
-# Track / corridor definitions (the "map")
-# --------------------------------------------------------------------------
 
 class TrackBlock(BaseModel):
-    """A single signalling block along the corridor."""
     block_id: str
     length_m: float = Field(gt=0)
-    max_speed_kmh: float = Field(gt=0)
-
-    # mutable runtime state (anomalies act on these)
-    signal_aspect: SignalAspect = SignalAspect.GREEN
-    weather: WeatherCondition = WeatherCondition.CLEAR
-    temporary_speed_restriction_kmh: Optional[float] = None
-    maintenance_hold: bool = False
+    speed_limit_kmh: float = Field(gt=0)
+    gradient_percent: float = 0.0
+    curve_radius_m: Optional[float] = Field(default=None, gt=0)
+    curve_speed_limit_kmh: Optional[float] = Field(default=None, gt=0)
 
 
-class Corridor(BaseModel):
-    """An ordered sequence of blocks forming a rail corridor."""
-    corridor_id: str
-    name: str
-    blocks: list[TrackBlock]
+class Route(BaseModel):
+    route_id: str
+    route_name: str
+    blocks: list[TrackBlock] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_blocks(self):
+        ids = [b.block_id for b in self.blocks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("block_id values must be unique")
+        return self
 
     def block_index(self, block_id: str) -> int:
-        for i, b in enumerate(self.blocks):
-            if b.block_id == block_id:
+        for i, block in enumerate(self.blocks):
+            if block.block_id == block_id:
                 return i
         raise KeyError(f"Unknown block_id: {block_id}")
 
-    def lookahead(self, current_index: int, horizon: int = 4) -> list[TrackBlock]:
-        """Blocks 0..+horizon ahead of current_index (Block 0 = current)."""
-        return self.blocks[current_index: current_index + horizon + 1]
+    def block_start_distance_m(self, block_id: str) -> float:
+        idx = self.block_index(block_id)
+        return sum(b.length_m for b in self.blocks[:idx])
+
+    @property
+    def total_length_m(self) -> float:
+        return sum(b.length_m for b in self.blocks)
+
+    def locate(self, route_position_m: float) -> tuple[int, TrackBlock, float]:
+        pos = min(max(route_position_m, 0.0), self.total_length_m)
+        cumulative = 0.0
+        for i, block in enumerate(self.blocks):
+            end = cumulative + block.length_m
+            if pos < end or i == len(self.blocks) - 1:
+                return i, block, min(block.length_m, max(0.0, pos - cumulative))
+            cumulative = end
+        raise RuntimeError("Unable to locate route position")
 
 
-# --------------------------------------------------------------------------
-# Train definition
-# --------------------------------------------------------------------------
+class Signal(BaseModel):
+    signal_id: str
+    protected_block_id: str
+
+
+class InitialTrainState(BaseModel):
+    start_block_id: str
+    position_in_block_m: float = Field(default=0.0, ge=0)
+    initial_speed_kmh: float = Field(default=0.0, ge=0)
+
 
 class TrainConfig(BaseModel):
     train_id: str
-    name: str = ""
-    start_block_id: str
-    initial_speed_kmh: float = 0.0
+    train_name: str = ""
+    max_speed_kmh: float = Field(gt=0)
+    length_m: float = Field(gt=0)
+    accel_ms2: float = Field(gt=0)
+    service_decel_ms2: float = Field(gt=0)
+    emergency_decel_ms2: float = Field(gt=0)
+    initial_state: InitialTrainState
 
-    # physics constants — overridable per train (e.g. freight vs express)
-    service_decel_ms2: float = 0.7
-    emergency_decel_ms2: float = 1.0
-    accel_ms2: float = 0.5
+
+class JourneyEndpoint(BaseModel):
+    block_id: str
+    position_in_block_m: float = Field(ge=0)
 
 
-# --------------------------------------------------------------------------
-# Simulation-level config
-# --------------------------------------------------------------------------
+class Journey(BaseModel):
+    source: JourneyEndpoint
+    destination: JourneyEndpoint
+
+
+class WeatherTimelineEntry(BaseModel):
+    start_time_s: float = Field(ge=0)
+    condition: WeatherCondition
+    visibility_m: float = Field(gt=0)
+
+
+class BlockWeatherSchedule(BaseModel):
+    block_id: str
+    timeline: list[WeatherTimelineEntry] = Field(min_length=1)
+
+
+class SignalTimelineEntry(BaseModel):
+    start_time_s: float = Field(ge=0)
+    aspect: SignalAspect
+
+
+class SignalStateSchedule(BaseModel):
+    signal_id: str
+    timeline: list[SignalTimelineEntry] = Field(min_length=1)
+
+
+class TemporarySpeedRestriction(BaseModel):
+    restriction_id: str
+    block_id: str
+    start_position_m: float = Field(ge=0)
+    end_position_m: float = Field(gt=0)
+    speed_limit_kmh: float = Field(gt=0)
+    start_time_s: float = Field(default=0.0, ge=0)
+    end_time_s: Optional[float] = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.end_position_m <= self.start_position_m:
+            raise ValueError("restriction end_position_m must exceed start_position_m")
+        if self.end_time_s is not None and self.end_time_s <= self.start_time_s:
+            raise ValueError("restriction end_time_s must exceed start_time_s")
+        return self
+
+
+class MaintenanceRestriction(TemporarySpeedRestriction):
+    pass
+
+
+class CrossingTimelineEntry(BaseModel):
+    start_time_s: float = Field(ge=0)
+    state: CrossingState
+
+
+class Crossing(BaseModel):
+    crossing_id: str
+    block_id: str
+    position_in_block_m: float = Field(ge=0)
+    timeline: list[CrossingTimelineEntry] = Field(min_length=1)
+
+
+class EnvironmentConfig(BaseModel):
+    weather: list[BlockWeatherSchedule] = Field(default_factory=list)
+    signal_states: list[SignalStateSchedule] = Field(default_factory=list)
+    temporary_speed_restrictions: list[TemporarySpeedRestriction] = Field(default_factory=list)
+    maintenance_restrictions: list[MaintenanceRestriction] = Field(default_factory=list)
+    crossings: list[Crossing] = Field(default_factory=list)
+
+
+class SimulationSettings(BaseModel):
+    tick_seconds: float = Field(default=1.0, gt=0)
+    max_simulation_time_s: float = Field(default=7200.0, gt=0)
+    random_seed: Optional[int] = None
+    braking_safety_margin_m: float = Field(default=15.0, ge=0)
+    speed_tolerance_kmh: float = Field(default=0.5, ge=0)
+
 
 class SimulationConfig(BaseModel):
-    corridor: Corridor
-    trains: list[TrainConfig]
-    tick_seconds: float = 1.0
-    max_ticks: int = 3600
-    caution_speed_kmh: float = 30.0
-    lookahead_blocks: int = 4
-    random_seed: Optional[int] = None
+    route: Route
+    signals: list[Signal]
+    train: TrainConfig
+    journey: Journey
+    environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
+    simulation: SimulationSettings = Field(default_factory=SimulationSettings)
 
+    @model_validator(mode="after")
+    def validate_references(self):
+        block_ids = {b.block_id for b in self.route.blocks}
+        signal_ids = [s.signal_id for s in self.signals]
+        if len(signal_ids) != len(set(signal_ids)):
+            raise ValueError("signal_id values must be unique")
+        for signal in self.signals:
+            if signal.protected_block_id not in block_ids:
+                raise ValueError(f"Signal {signal.signal_id} references unknown block {signal.protected_block_id}")
+        if self.train.initial_state.start_block_id not in block_ids:
+            raise ValueError("train.initial_state.start_block_id is unknown")
+        for endpoint_name, endpoint in (("source", self.journey.source), ("destination", self.journey.destination)):
+            if endpoint.block_id not in block_ids:
+                raise ValueError(f"journey.{endpoint_name}.block_id is unknown")
+            block = self.route.blocks[self.route.block_index(endpoint.block_id)]
+            if endpoint.position_in_block_m > block.length_m:
+                raise ValueError(f"journey.{endpoint_name}.position_in_block_m exceeds block length")
+        start_block = self.route.blocks[self.route.block_index(self.train.initial_state.start_block_id)]
+        if self.train.initial_state.position_in_block_m > start_block.length_m:
+            raise ValueError("train initial position exceeds start block length")
+        if self.train.initial_state.initial_speed_kmh > self.train.max_speed_kmh:
+            raise ValueError("initial_speed_kmh cannot exceed train max_speed_kmh")
 
-# --------------------------------------------------------------------------
-# Output: telemetry frame emitted every tick, per train
-# --------------------------------------------------------------------------
+        signal_set = set(signal_ids)
+        for schedule in self.environment.signal_states:
+            if schedule.signal_id not in signal_set:
+                raise ValueError(f"Signal schedule references unknown signal {schedule.signal_id}")
+            self._validate_timeline(schedule.timeline, f"signal {schedule.signal_id}")
+        for schedule in self.environment.weather:
+            if schedule.block_id not in block_ids:
+                raise ValueError(f"Weather schedule references unknown block {schedule.block_id}")
+            self._validate_timeline(schedule.timeline, f"weather {schedule.block_id}")
+        for restriction in [*self.environment.temporary_speed_restrictions, *self.environment.maintenance_restrictions]:
+            if restriction.block_id not in block_ids:
+                raise ValueError(f"Restriction references unknown block {restriction.block_id}")
+            block = self.route.blocks[self.route.block_index(restriction.block_id)]
+            if restriction.end_position_m > block.length_m:
+                raise ValueError(f"Restriction {restriction.restriction_id} exceeds block length")
+        for crossing in self.environment.crossings:
+            if crossing.block_id not in block_ids:
+                raise ValueError(f"Crossing {crossing.crossing_id} references unknown block")
+            block = self.route.blocks[self.route.block_index(crossing.block_id)]
+            if crossing.position_in_block_m > block.length_m:
+                raise ValueError(f"Crossing {crossing.crossing_id} exceeds block length")
+            self._validate_timeline(crossing.timeline, f"crossing {crossing.crossing_id}")
+
+        source_m = self.route.block_start_distance_m(self.journey.source.block_id) + self.journey.source.position_in_block_m
+        destination_m = self.route.block_start_distance_m(self.journey.destination.block_id) + self.journey.destination.position_in_block_m
+        if destination_m <= source_m:
+            raise ValueError("destination must be after source on the v1 linear route")
+        return self
+
+    @staticmethod
+    def _validate_timeline(timeline, label: str) -> None:
+        starts = [entry.start_time_s for entry in timeline]
+        if starts != sorted(starts):
+            raise ValueError(f"{label} timeline must be sorted by start_time_s")
+        if starts and starts[0] != 0:
+            raise ValueError(f"{label} timeline must start at time 0")
+
 
 class TelemetryFrame(BaseModel):
-    """One tick of state for one train. This is the atomic unit of output,
-    whether it ends up in a Parquet file (batch/training) or a WebSocket
-    message (live demo)."""
-
     scenario_id: str
     train_id: str
     tick: int
     sim_time_s: float
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    block_id: str
+    current_block_id: str
     position_in_block_m: float
+    route_position_m: float
     speed_kmh: float
     acceleration_ms2: float
+    control_action: str
+    control_reason: str
 
+    current_block_speed_limit_kmh: float
+    current_gradient_percent: float
+    current_curve_speed_limit_kmh: Optional[float] = None
     effective_speed_ceiling_kmh: float
-    signal_aspect: SignalAspect
+
     weather: WeatherCondition
+    visibility_m: float
 
-    ebd_distance_m: float
-    remaining_block_distance_m: float
+    distance_to_destination_m: float
+    route_progress: float
 
-    anomaly_active: bool = False
-    guardrail_triggered: bool = False
-    guardrail_event: Optional[str] = None
+    next_signal_aspect: Optional[SignalAspect] = None
+    distance_to_next_signal_m: Optional[float] = None
+    second_signal_aspect: Optional[SignalAspect] = None
+    distance_to_second_signal_m: Optional[float] = None
+
+    next_speed_limit_kmh: Optional[float] = None
+    distance_to_next_speed_change_m: Optional[float] = None
+    next_curve_limit_kmh: Optional[float] = None
+    distance_to_next_curve_m: Optional[float] = None
+
+    next_tsr_limit_kmh: Optional[float] = None
+    distance_to_next_tsr_m: Optional[float] = None
+    next_crossing_state: Optional[CrossingState] = None
+    distance_to_next_crossing_m: Optional[float] = None
+
+    actual_remaining_time_s: Optional[float] = None
+    actual_arrival_simulation_s: Optional[float] = None
+    total_journey_time_s: Optional[float] = None
