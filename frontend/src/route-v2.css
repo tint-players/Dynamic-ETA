@@ -2,13 +2,15 @@
 .realistic-route-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 14px 12px; }
 .realistic-route { min-width: 1180px; width: 100%; height: auto; display: block; }
 .block-boundary { stroke: #31445c; stroke-width: 1; stroke-dasharray: 5 7; opacity: .55; }
-.track-bed-path { fill: none; stroke: #1f2937; stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
-.track-rail-path { fill: none; stroke: #d1d5db; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 10; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
-.track-name { fill: #8fa2b9; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.track-ballast-path { fill: none; stroke: #475569; stroke-width: 17; stroke-linecap: round; stroke-linejoin: round; opacity: .72; }
+.track-bed-path { fill: none; stroke: #1f2937; stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
+.track-sleeper-path { fill: none; stroke: #a78b6d; stroke-width: 9; stroke-linecap: butt; stroke-dasharray: 2 8; opacity: .88; }
+.track-rail-path { fill: none; stroke: #e5e7eb; stroke-width: 3.6; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+.track-name { fill: #9fb1c5; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
 .block-svg-label text { fill: #e5edf7; font-size: 11px; font-weight: 800; }
 .block-svg-label .block-speed-label { fill: #8fa2b9; font-size: 10px; font-weight: 600; }
 .block-svg-label .curve-label { fill: #7dd3fc; font-size: 10px; font-weight: 700; }
-.restriction-line { stroke-width: 7; stroke-linecap: round; opacity: .95; }
+.restriction-line { fill: none; stroke-width: 7; stroke-linecap: round; opacity: .95; }
 .tsr-line { stroke: #facc15; }
 .maintenance-line { stroke: #fb923c; }
 .restriction-svg-label { fill: #dbeafe; font-size: 9px; font-weight: 800; }
@@ -23,10 +25,12 @@
 .svg-crossing.closed line { stroke: #f43f5e; }
 .svg-crossing.closed text { fill: #fda4af; }
 .route-endpoints circle { fill: #cbd5e1; stroke: #0f172a; stroke-width: 2; }
-.svg-train { transition: transform .18s linear; }
-.svg-train rect, .svg-train path { fill: #38bdf8; stroke: #bae6fd; stroke-width: 1; filter: drop-shadow(0 0 8px rgba(56,189,248,.7)); }
-.svg-train circle { fill: #06101c; }
-.svg-train text { fill: #e0f2fe; font-size: 11px; font-weight: 900; paint-order: stroke; stroke: #07111b; stroke-width: 3px; stroke-linejoin: round; }
+.svg-train-position { transition: transform .18s linear; }
+.svg-train-body { transform-box: fill-box; transform-origin: center; }
+.svg-train-body rect, .svg-train-body path { fill: #38bdf8; stroke: #bae6fd; stroke-width: 1; filter: drop-shadow(0 0 8px rgba(56,189,248,.7)); }
+.svg-train-body .train-window { fill: #082f49; stroke: #bae6fd; stroke-width: .7; }
+.svg-train-body circle { fill: #06101c; stroke: #94a3b8; stroke-width: .8; }
+.train-speed-label { fill: #e0f2fe; font-size: 11px; font-weight: 900; paint-order: stroke; stroke: #07111b; stroke-width: 3px; stroke-linejoin: round; }
 .endpoint-svg-label { fill: #75879c; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
 
 @media (max-width: 680px) {
