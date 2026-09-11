@@ -45,6 +45,7 @@ def _telemetry_message(session: SimulationSession, frames) -> dict:
         "type": "telemetry_batch",
         "frames": [frame.model_dump(mode="json") for frame in frames],
         "signal_states": session.signal_states(),
+        "crossing_states": session.crossing_states(),
     }
 
 
@@ -79,6 +80,7 @@ def create_session(request: CreateSessionRequest) -> dict:
         "initial_frame": initial_frames[0].model_dump(mode="json"),
         "initial_frames": [frame.model_dump(mode="json") for frame in initial_frames],
         "signal_states": session.signal_states(),
+        "crossing_states": session.crossing_states(),
     }
 
 
@@ -101,6 +103,7 @@ def reset_session(session_id: str) -> dict:
         "session_id": session.session_id,
         "frames": [frame.model_dump(mode="json") for frame in frames],
         "signal_states": session.signal_states(),
+        "crossing_states": session.crossing_states(),
     }
 
 
