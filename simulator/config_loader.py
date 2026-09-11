@@ -1,21 +1,13 @@
-"""
-Loads corridor/train/simulation definitions from YAML into validated
-Pydantic models. Also accepts plain dicts, so this same function works
-whether the config came from a file, a JSON body in a future API route,
-or a hardcoded dict in a test.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
-
 import yaml
 
 from .models import SimulationConfig
 
 
 def load_simulation_config(path: str | Path) -> SimulationConfig:
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     return SimulationConfig(**raw)
 
