@@ -1,94 +1,88 @@
 from __future__ import annotations
 
-from simulator.models import SimulationConfig
+from simulator.models import SimulationConfig, TrainDirection
 
 
 def _timeline(entries):
     return [entry.model_dump(mode="json") for entry in entries]
 
 
-def config_for_visualization(config: SimulationConfig) -> dict:
-    """Serialize only backend-owned configuration needed to draw the route.
+def _endpoint_m(config: SimulationConfig, endpoint) -> float:
+    return config.route.block_start_distance_m(endpoint.block_id) + endpoint.position_in_block_m
 
-    Route positions are derived once from the canonical Python config. The
-    frontend may scale these values into pixels, but never recomputes physics.
-    """
+
+def config_for_visualization(config: SimulationConfig) -> dict:
     route = config.route
     blocks = []
     for block in route.blocks:
         start_m = route.block_start_distance_m(block.block_id)
-        blocks.append(
-            {
-                **block.model_dump(mode="json"),
-                "route_start_m": start_m,
-                "route_end_m": start_m + block.length_m,
-            }
-        )
+        blocks.append({
+            **block.model_dump(mode="json"),
+            "route_start_m": start_m,
+            "route_end_m": start_m + block.length_m,
+        })
 
     signals = []
     for signal in config.signals:
-        signals.append(
-            {
-                **signal.model_dump(mode="json"),
-                "route_position_m": route.block_start_distance_m(signal.protected_block_id),
-            }
-        )
+        block_start = route.block_start_distance_m(signal.protected_block_id)
+        block = route.blocks[route.block_index(signal.protected_block_id)]
+        position = block_start if signal.direction == TrainDirection.FORWARD else block_start + block.length_m
+        signals.append({**signal.model_dump(mode="json"), "route_position_m": position})
 
-    tsrs = []
-    for restriction in config.environment.temporary_speed_restrictions:
-        block_start = route.block_start_distance_m(restriction.block_id)
-        tsrs.append(
-            {
+    def restrictions(items):
+        result = []
+        for restriction in items:
+            block_start = route.block_start_distance_m(restriction.block_id)
+            result.append({
                 **restriction.model_dump(mode="json"),
                 "route_start_m": block_start + restriction.start_position_m,
                 "route_end_m": block_start + restriction.end_position_m,
-            }
-        )
-
-    maintenance = []
-    for restriction in config.environment.maintenance_restrictions:
-        block_start = route.block_start_distance_m(restriction.block_id)
-        maintenance.append(
-            {
-                **restriction.model_dump(mode="json"),
-                "route_start_m": block_start + restriction.start_position_m,
-                "route_end_m": block_start + restriction.end_position_m,
-            }
-        )
+            })
+        return result
 
     crossings = []
     for crossing in config.environment.crossings:
         block_start = route.block_start_distance_m(crossing.block_id)
-        crossings.append(
-            {
-                "crossing_id": crossing.crossing_id,
-                "block_id": crossing.block_id,
-                "position_in_block_m": crossing.position_in_block_m,
-                "route_position_m": block_start + crossing.position_in_block_m,
-                "timeline": _timeline(crossing.timeline),
-            }
-        )
+        crossings.append({
+            "crossing_id": crossing.crossing_id,
+            "block_id": crossing.block_id,
+            "position_in_block_m": crossing.position_in_block_m,
+            "route_position_m": block_start + crossing.position_in_block_m,
+            "timeline": _timeline(crossing.timeline),
+        })
 
-    weather = [
-        {
-            "block_id": schedule.block_id,
-            "timeline": _timeline(schedule.timeline),
-        }
-        for schedule in config.environment.weather
-    ]
-    signal_states = [
-        {
-            "signal_id": schedule.signal_id,
-            "timeline": _timeline(schedule.timeline),
-        }
-        for schedule in config.environment.signal_states
-    ]
+    stations = []
+    for station in config.stations:
+        platforms = []
+        for platform in station.platforms:
+            route_position = route.block_start_distance_m(platform.block_id) + platform.position_in_block_m
+            platforms.append({**platform.model_dump(mode="json"), "route_position_m": route_position})
+        stations.append({
+            "station_id": station.station_id,
+            "station_name": station.station_name,
+            "platforms": platforms,
+        })
 
-    source_m = route.block_start_distance_m(config.journey.source.block_id) + config.journey.source.position_in_block_m
-    destination_m = (
-        route.block_start_distance_m(config.journey.destination.block_id)
-        + config.journey.destination.position_in_block_m
-    )
+    trains = [{
+        "train": config.train.model_dump(mode="json"),
+        "journey": config.journey.model_dump(mode="json"),
+        "departure_time_s": 0.0,
+        "station_stops": [item.model_dump(mode="json") for item in config.primary_station_stops],
+        "source_route_m": _endpoint_m(config, config.journey.source),
+        "destination_route_m": _endpoint_m(config, config.journey.destination),
+    }]
+    for run in config.additional_train_runs:
+        trains.append({
+            "train": run.train.model_dump(mode="json"),
+            "journey": run.journey.model_dump(mode="json"),
+            "departure_time_s": run.departure_time_s,
+            "station_stops": [item.model_dump(mode="json") for item in run.station_stops],
+            "source_route_m": _endpoint_m(config, run.journey.source),
+            "destination_route_m": _endpoint_m(config, run.journey.destination),
+        })
+
+    source_m = _endpoint_m(config, config.journey.source)
+    destination_m = _endpoint_m(config, config.journey.destination)
 
     return {
         "route": {
@@ -99,6 +93,9 @@ def config_for_visualization(config: SimulationConfig) -> dict:
             "blocks": blocks,
         },
         "signals": signals,
+        "dynamic_signalling": config.dynamic_signalling,
+        "stations": stations,
+        "trains": trains,
         "train": config.train.model_dump(mode="json"),
         "journey": {
             **config.journey.model_dump(mode="json"),
@@ -106,10 +103,10 @@ def config_for_visualization(config: SimulationConfig) -> dict:
             "destination_route_m": destination_m,
         },
         "environment": {
-            "weather": weather,
-            "signal_states": signal_states,
-            "temporary_speed_restrictions": tsrs,
-            "maintenance_restrictions": maintenance,
+            "weather": [{"block_id": item.block_id, "timeline": _timeline(item.timeline)} for item in config.environment.weather],
+            "signal_states": [{"signal_id": item.signal_id, "timeline": _timeline(item.timeline)} for item in config.environment.signal_states],
+            "temporary_speed_restrictions": restrictions(config.environment.temporary_speed_restrictions),
+            "maintenance_restrictions": restrictions(config.environment.maintenance_restrictions),
             "crossings": crossings,
         },
         "simulation": config.simulation.model_dump(mode="json"),
