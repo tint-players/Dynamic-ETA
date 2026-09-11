@@ -145,11 +145,34 @@ class StationStop(BaseModel):
     dwell_time_s: float = Field(default=30.0, ge=0)
 
 
+class Crossover(BaseModel):
+    crossover_id: str
+    block_id: str
+    start_position_m: float = Field(ge=0)
+    end_position_m: float = Field(gt=0)
+    from_track_id: str
+    to_track_id: str
+
+    @model_validator(mode="after")
+    def validate_crossover(self):
+        if self.end_position_m <= self.start_position_m:
+            raise ValueError("crossover end_position_m must exceed start_position_m")
+        if self.from_track_id == self.to_track_id:
+            raise ValueError("crossover must connect two different tracks")
+        return self
+
+
+class TrackChangePlan(BaseModel):
+    crossover_id: str
+    reverse_after_change: bool = False
+
+
 class TrainRun(BaseModel):
     train: TrainConfig
     journey: Journey
     departure_time_s: float = Field(default=0.0, ge=0)
     station_stops: list[StationStop] = Field(default_factory=list)
+    track_changes: list[TrackChangePlan] = Field(default_factory=list)
 
 
 class WeatherTimelineEntry(BaseModel):
@@ -230,8 +253,10 @@ class SimulationConfig(BaseModel):
     train: TrainConfig
     journey: Journey
     primary_station_stops: list[StationStop] = Field(default_factory=list)
+    primary_track_changes: list[TrackChangePlan] = Field(default_factory=list)
     additional_train_runs: list[TrainRun] = Field(default_factory=list)
     stations: list[Station] = Field(default_factory=list)
+    crossovers: list[Crossover] = Field(default_factory=list)
     dynamic_signalling: bool = False
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     simulation: SimulationSettings = Field(default_factory=SimulationSettings)
@@ -299,10 +324,26 @@ class SimulationConfig(BaseModel):
                 if platform.position_in_block_m > block.length_m:
                     raise ValueError(f"Platform {platform.platform_id} exceeds block length")
 
+        crossover_ids = [item.crossover_id for item in self.crossovers]
+        if len(crossover_ids) != len(set(crossover_ids)):
+            raise ValueError("crossover_id values must be unique")
+        for crossover in self.crossovers:
+            if crossover.block_id not in block_ids:
+                raise ValueError(f"Crossover {crossover.crossover_id} references unknown block")
+            if crossover.from_track_id not in track_ids or crossover.to_track_id not in track_ids:
+                raise ValueError(f"Crossover {crossover.crossover_id} references unknown track")
+            block = self.route.blocks[self.route.block_index(crossover.block_id)]
+            if crossover.end_position_m > block.length_m:
+                raise ValueError(f"Crossover {crossover.crossover_id} exceeds block length")
+        crossover_set = set(crossover_ids)
+
         station_set = set(station_ids)
         for stop in self.primary_station_stops:
             if stop.station_id not in station_set:
                 raise ValueError(f"Primary stop references unknown station {stop.station_id}")
+        for change in self.primary_track_changes:
+            if change.crossover_id not in crossover_set:
+                raise ValueError(f"Primary track change references unknown crossover {change.crossover_id}")
 
         train_ids = [self.train.train_id]
         for i, run in enumerate(self.additional_train_runs):
@@ -312,6 +353,9 @@ class SimulationConfig(BaseModel):
             for stop in run.station_stops:
                 if stop.station_id not in station_set:
                     raise ValueError(f"Train {run.train.train_id} stop references unknown station {stop.station_id}")
+            for change in run.track_changes:
+                if change.crossover_id not in crossover_set:
+                    raise ValueError(f"Train {run.train.train_id} references unknown crossover {change.crossover_id}")
         if len(train_ids) != len(set(train_ids)):
             raise ValueError("train_id values must be unique across all train runs")
 

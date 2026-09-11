@@ -7,12 +7,15 @@ on:
       - multi-train-track-stations-v1
       - multi-train-track-v2
       - multi-train-track-v3
+      - multi-train-track-v4
   pull_request:
     branches:
       - component-a-simulator-v1
       - frontend-simulator-dashboard
       - multi-train-track-stations-v1
       - multi-train-track-v2
+      - multi-train-track-v3
+      - multi-train-track-v4
 
 jobs:
   test:

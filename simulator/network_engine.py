@@ -13,15 +13,18 @@ class RuntimeTrain:
     journey: object
     departure_time_s: float
     station_stops: list
+    track_changes: list
     source_m: float
     destination_m: float
     route_position_m: float
+    current_track_id: str
     speed_kmh: float = 0.0
     acceleration_ms2: float = 0.0
     completed: bool = False
     dwell_until_s: float | None = None
     dwelling_station_id: str | None = None
     served_stations: set[str] = field(default_factory=set)
+    completed_crossovers: set[str] = field(default_factory=set)
 
     @property
     def direction(self) -> TrainDirection:
@@ -42,7 +45,7 @@ class Target:
 
 
 class NetworkSimulationEngine:
-    """Parallel-track multi-train simulation with occupancy-driven signalling."""
+    """Parallel-track multi-train simulation with occupancy-driven signalling and crossovers."""
 
     def __init__(self, config: SimulationConfig, scenario_id: str = "default"):
         self.config = config
@@ -52,26 +55,22 @@ class NetworkSimulationEngine:
         self.trains: list[RuntimeTrain] = []
         self._weather = {x.block_id: x for x in config.environment.weather}
         self._signal_schedules = {x.signal_id: x for x in config.environment.signal_states}
-
-        self._add_train(config.train, config.journey, 0.0, config.primary_station_stops)
+        self._crossovers = {x.crossover_id: x for x in config.crossovers}
+        self._add_train(config.train, config.journey, 0.0, config.primary_station_stops, config.primary_track_changes)
         for run in config.additional_train_runs:
-            self._add_train(run.train, run.journey, run.departure_time_s, run.station_stops)
+            self._add_train(run.train, run.journey, run.departure_time_s, run.station_stops, run.track_changes)
 
     def _endpoint_m(self, endpoint) -> float:
         return self.config.route.block_start_distance_m(endpoint.block_id) + endpoint.position_in_block_m
 
-    def _add_train(self, train, journey, departure, stops) -> None:
+    def _add_train(self, train, journey, departure, stops, track_changes) -> None:
         source = self._endpoint_m(journey.source)
         destination = self._endpoint_m(journey.destination)
         self.trains.append(RuntimeTrain(
-            train=train,
-            journey=journey,
-            departure_time_s=departure,
-            station_stops=list(stops),
-            source_m=source,
-            destination_m=destination,
-            route_position_m=source,
-            speed_kmh=train.initial_state.initial_speed_kmh,
+            train=train, journey=journey, departure_time_s=departure,
+            station_stops=list(stops), track_changes=list(track_changes),
+            source_m=source, destination_m=destination, route_position_m=source,
+            current_track_id=train.track_id, speed_kmh=train.initial_state.initial_speed_kmh,
         ))
 
     @property
@@ -82,16 +81,13 @@ class NetworkSimulationEngine:
     def _active_entry(timeline, sim_time_s: float):
         active = timeline[0]
         for item in timeline:
-            if item.start_time_s <= sim_time_s:
-                active = item
-            else:
-                break
+            if item.start_time_s <= sim_time_s: active = item
+            else: break
         return active
 
     def _weather_at(self, block_id: str) -> tuple[WeatherCondition, float]:
         schedule = self._weather.get(block_id)
-        if schedule is None:
-            return WeatherCondition.CLEAR, 10000.0
+        if schedule is None: return WeatherCondition.CLEAR, 10000.0
         item = self._active_entry(schedule.timeline, self.sim_time_s)
         return item.condition, item.visibility_m
 
@@ -106,110 +102,104 @@ class NetworkSimulationEngine:
         block = self.config.route.blocks[self.config.route.block_index(signal.protected_block_id)]
         return start if signal.direction == TrainDirection.FORWARD else start + block.length_m
 
+    def _crossover_bounds(self, crossover) -> tuple[float, float, float]:
+        block_start = self.config.route.block_start_distance_m(crossover.block_id)
+        start = block_start + crossover.start_position_m
+        end = block_start + crossover.end_position_m
+        return start, end, (start + end) / 2
+
+    def _occupancy_tracks(self, train: RuntimeTrain) -> set[str]:
+        tracks = {train.current_track_id}
+        for plan in train.track_changes:
+            if plan.crossover_id in train.completed_crossovers: continue
+            crossover = self._crossovers[plan.crossover_id]
+            start, end, _ = self._crossover_bounds(crossover)
+            if start <= train.route_position_m <= end:
+                tracks.update({crossover.from_track_id, crossover.to_track_id})
+        return tracks
+
     def _body_interval(self, train: RuntimeTrain) -> tuple[float, float]:
         if train.direction == TrainDirection.FORWARD:
             return train.route_position_m - train.train.length_m, train.route_position_m
         return train.route_position_m, train.route_position_m + train.train.length_m
 
     def _block_occupied(self, track_id: str, block_index: int, exclude: RuntimeTrain | None = None) -> bool:
-        if block_index < 0 or block_index >= len(self.config.route.blocks):
-            return False
+        if block_index < 0 or block_index >= len(self.config.route.blocks): return False
         block = self.config.route.blocks[block_index]
-        start = self.config.route.block_start_distance_m(block.block_id)
-        end = start + block.length_m
+        start = self.config.route.block_start_distance_m(block.block_id); end = start + block.length_m
         for train in self.trains:
-            if train is exclude or train.train.track_id != track_id or train.completed or self.sim_time_s < train.departure_time_s:
-                continue
+            if train is exclude or train.completed or self.sim_time_s < train.departure_time_s: continue
+            if track_id not in self._occupancy_tracks(train): continue
             rear, front = self._body_interval(train)
-            if front >= start - 1e-6 and rear <= end + 1e-6:
-                return True
+            if front >= start - 1e-6 and rear <= end + 1e-6: return True
         return False
 
     def _scheduled_signal(self, signal_id: str) -> SignalAspect:
         schedule = self._signal_schedules.get(signal_id)
-        if schedule is None:
-            return SignalAspect.GREEN
+        if schedule is None: return SignalAspect.GREEN
         return self._active_entry(schedule.timeline, self.sim_time_s).aspect
 
     def signal_aspect(self, signal, exclude: RuntimeTrain | None = None) -> SignalAspect:
-        if not self.config.dynamic_signalling:
-            return self._scheduled_signal(signal.signal_id)
+        if not self.config.dynamic_signalling: return self._scheduled_signal(signal.signal_id)
         idx = self.config.route.block_index(signal.protected_block_id)
-        if self._block_occupied(signal.track_id, idx, exclude=exclude):
-            return SignalAspect.RED
+        if self._block_occupied(signal.track_id, idx, exclude=exclude): return SignalAspect.RED
         next_idx = idx + (1 if signal.direction == TrainDirection.FORWARD else -1)
-        if self._block_occupied(signal.track_id, next_idx, exclude=exclude):
-            return SignalAspect.YELLOW
+        if self._block_occupied(signal.track_id, next_idx, exclude=exclude): return SignalAspect.YELLOW
         return SignalAspect.GREEN
 
     def signal_states(self) -> dict[str, SignalAspect]:
         return {signal.signal_id: self.signal_aspect(signal) for signal in self.config.signals}
 
     def _ahead(self, train: RuntimeTrain, target_m: float) -> float | None:
-        distance = (target_m - train.route_position_m) * train.sign
-        return distance if distance >= -1e-6 else None
+        d = (target_m - train.route_position_m) * train.sign
+        return d if d >= -1e-6 else None
 
     def _platform_position(self, station_id: str, track_id: str) -> float | None:
         station = next((s for s in self.config.stations if s.station_id == station_id), None)
-        if station is None:
-            return None
+        if station is None: return None
         platform = next((p for p in station.platforms if p.track_id == track_id), None)
-        if platform is None:
-            return None
+        if platform is None: return None
         return self.config.route.block_start_distance_m(platform.block_id) + platform.position_in_block_m
 
     def _current_ceiling(self, train: RuntimeTrain) -> tuple[float, WeatherCondition, float]:
         _, block, local = self.config.route.locate(train.route_position_m)
         weather, visibility = self._weather_at(block.block_id)
         ceiling = min(train.train.max_speed_kmh, block.speed_limit_kmh)
-        if block.curve_speed_limit_kmh is not None:
-            ceiling = min(ceiling, block.curve_speed_limit_kmh)
+        if block.curve_speed_limit_kmh is not None: ceiling = min(ceiling, block.curve_speed_limit_kmh)
         ceiling *= weather_speed_factor(weather, visibility)
-        for restriction in [*self.config.environment.temporary_speed_restrictions, *self.config.environment.maintenance_restrictions]:
-            if restriction.block_id == block.block_id and restriction.start_position_m <= local < restriction.end_position_m and self._restriction_active(restriction):
-                ceiling = min(ceiling, restriction.speed_limit_kmh)
+        for r in [*self.config.environment.temporary_speed_restrictions, *self.config.environment.maintenance_restrictions]:
+            if r.block_id == block.block_id and r.start_position_m <= local < r.end_position_m and self._restriction_active(r):
+                ceiling = min(ceiling, r.speed_limit_kmh)
         return max(0.0, ceiling), weather, visibility
 
     def _targets(self, train: RuntimeTrain) -> list[Target]:
         targets = [Target(train.destination_m, 0.0, "DESTINATION", True)]
-
         for stop in train.station_stops:
-            if stop.station_id in train.served_stations:
-                continue
-            pos = self._platform_position(stop.station_id, train.train.track_id)
+            if stop.station_id in train.served_stations: continue
+            pos = self._platform_position(stop.station_id, train.current_track_id)
             if pos is not None and self._ahead(train, pos) is not None:
                 targets.append(Target(pos, 0.0, f"STATION:{stop.station_id}", True, stop.station_id))
-
         for crossing in self.config.environment.crossings:
-            if self._crossing_state(crossing) != CrossingState.CLOSED_FOR_TRAIN:
-                continue
+            if self._crossing_state(crossing) != CrossingState.CLOSED_FOR_TRAIN: continue
             pos = self.config.route.block_start_distance_m(crossing.block_id) + crossing.position_in_block_m
-            if self._ahead(train, pos) is not None:
-                targets.append(Target(pos, 0.0, f"CROSSING:{crossing.crossing_id}", True))
-
+            if self._ahead(train, pos) is not None: targets.append(Target(pos, 0.0, f"CROSSING:{crossing.crossing_id}", True))
         for signal in self.config.signals:
-            if signal.track_id != train.train.track_id or signal.direction != train.direction:
-                continue
+            if signal.track_id != train.current_track_id or signal.direction != train.direction: continue
             pos = self._signal_position(signal)
-            d = self._ahead(train, pos)
-            if d is None:
-                continue
-            # Excluding this train prevents its own occupied block from making the
-            # entry signal under its nose red. Other trains still make it red.
-            if self.signal_aspect(signal, exclude=train) == SignalAspect.RED:
+            if self._ahead(train, pos) is not None and self.signal_aspect(signal, exclude=train) == SignalAspect.RED:
                 targets.append(Target(pos, 0.0, f"RED_SIGNAL:{signal.signal_id}", True))
-
         separation = self.config.simulation.train_separation_m
         for other in self.trains:
-            if other is train or other.completed or other.train.track_id != train.train.track_id or other.direction != train.direction:
-                continue
+            if other is train or other.completed or self.sim_time_s < other.departure_time_s: continue
+            if other.current_track_id != train.current_track_id: continue
             gap = (other.route_position_m - train.route_position_m) * train.sign
-            if gap <= 0:
-                continue
-            safe_pos = other.route_position_m - train.sign * (other.train.length_m + separation)
+            if gap <= 0: continue
+            if other.direction == train.direction:
+                safe_pos = other.route_position_m - train.sign * (other.train.length_m + separation)
+            else:
+                safe_pos = other.route_position_m - train.sign * (separation + (train.train.length_m + other.train.length_m) / 2)
             if self._ahead(train, safe_pos) is not None:
                 targets.append(Target(safe_pos, 0.0, f"TRAIN_AHEAD:{other.train.train_id}", True))
-
         idx, current_block, _ = self.config.route.locate(train.route_position_m)
         future_indices = range(idx + 1, len(self.config.route.blocks)) if train.sign > 0 else range(idx - 1, -1, -1)
         for i in future_indices:
@@ -218,8 +208,7 @@ class NetworkSimulationEngine:
             boundary = start if train.sign > 0 else start + block.length_m
             weather, visibility = self._weather_at(block.block_id)
             limit = min(train.train.max_speed_kmh, block.speed_limit_kmh)
-            if block.curve_speed_limit_kmh is not None:
-                limit = min(limit, block.curve_speed_limit_kmh)
+            if block.curve_speed_limit_kmh is not None: limit = min(limit, block.curve_speed_limit_kmh)
             limit *= weather_speed_factor(weather, visibility)
             if limit < current_block.speed_limit_kmh or block.curve_speed_limit_kmh is not None:
                 targets.append(Target(boundary, limit, f"UPCOMING_BLOCK:{block.block_id}"))
@@ -232,28 +221,36 @@ class NetworkSimulationEngine:
         decel = max(0.2, train.train.service_decel_ms2 * weather_braking_factor(weather) + grade)
         margin = self.config.simulation.braking_safety_margin_m
         for target in self._targets(train):
-            distance = max(0.0, (target.position_m - train.route_position_m) * train.sign - margin)
+            raw_distance = max(0.0, (target.position_m - train.route_position_m) * train.sign)
+            distance = raw_distance if target.hard_stop else max(0.0, raw_distance - margin)
             safe = ms_to_kmh(safe_speed_for_target(kmh_to_ms(target.speed_kmh), distance, decel))
-            if safe < desired:
-                desired, reason = safe, target.reason
+            if safe < desired: desired, reason = safe, target.reason
         return max(0.0, desired), reason
 
+    def _apply_track_change(self, train: RuntimeTrain, old_pos: float, new_pos: float) -> str | None:
+        for plan in train.track_changes:
+            if plan.crossover_id in train.completed_crossovers: continue
+            crossover = self._crossovers[plan.crossover_id]
+            if train.current_track_id != crossover.from_track_id: continue
+            _, _, midpoint = self._crossover_bounds(crossover)
+            crossed = (old_pos - midpoint) * train.sign < 0 <= (new_pos - midpoint) * train.sign
+            if crossed:
+                train.current_track_id = crossover.to_track_id
+                train.completed_crossovers.add(plan.crossover_id)
+                return f"CROSSOVER:{plan.crossover_id}"
+        return None
+
     def _advance(self, train: RuntimeTrain, dt: float) -> tuple[str, str]:
-        if train.completed:
-            return "STOP", "DESTINATION"
+        if train.completed: return "STOP", "DESTINATION"
         if self.sim_time_s < train.departure_time_s:
-            train.speed_kmh = 0.0
+            train.speed_kmh = 0.0; train.acceleration_ms2 = 0.0
             return "WAIT", "SCHEDULED_DEPARTURE"
         if train.dwell_until_s is not None:
             if self.sim_time_s < train.dwell_until_s:
-                train.speed_kmh = 0.0
-                train.acceleration_ms2 = 0.0
+                train.speed_kmh = 0.0; train.acceleration_ms2 = 0.0
                 return "STOP", f"STATION_DWELL:{train.dwelling_station_id}"
-            if train.dwelling_station_id:
-                train.served_stations.add(train.dwelling_station_id)
-            train.dwelling_station_id = None
-            train.dwell_until_s = None
-
+            if train.dwelling_station_id: train.served_stations.add(train.dwelling_station_id)
+            train.dwelling_station_id = None; train.dwell_until_s = None
         ceiling, weather, _ = self._current_ceiling(train)
         desired, reason = self._desired_speed(train, ceiling, weather)
         _, block, _ = self.config.route.locate(train.route_position_m)
@@ -263,44 +260,36 @@ class NetworkSimulationEngine:
             accel, action = -max(0.2, train.train.service_decel_ms2 * weather_braking_factor(weather) + grade), "BRAKE"
         elif train.speed_kmh < desired - tol:
             accel, action = max(0.05, train.train.accel_ms2 - grade), "ACCELERATE"
-        else:
-            accel, action = 0.0, "MAINTAIN"
-
+        else: accel, action = 0.0, "MAINTAIN"
         old_v = kmh_to_ms(train.speed_kmh)
         new_v = update_velocity(old_v, accel, dt)
         desired_v = kmh_to_ms(desired)
         new_v = min(new_v, desired_v) if accel > 0 else max(new_v, desired_v) if accel < 0 else new_v
         travel = max(0.0, old_v * dt + 0.5 * accel * dt * dt)
-        new_pos = train.route_position_m + train.sign * travel
-
+        old_pos = train.route_position_m
+        new_pos = old_pos + train.sign * travel
         hard = [t for t in self._targets(train) if t.hard_stop]
         if hard:
-            nearest = min(hard, key=lambda t: (t.position_m - train.route_position_m) * train.sign)
+            nearest = min(hard, key=lambda t: (t.position_m - old_pos) * train.sign)
             if (new_pos - nearest.position_m) * train.sign >= 0:
-                new_pos = nearest.position_m
-                new_v = 0.0
-                action, reason = "STOP", nearest.reason
-                if nearest.reason == "DESTINATION":
-                    train.completed = True
+                new_pos = nearest.position_m; new_v = 0.0; action, reason = "STOP", nearest.reason
+                if nearest.reason == "DESTINATION": train.completed = True
                 elif nearest.station_id:
                     stop = next(s for s in train.station_stops if s.station_id == nearest.station_id)
-                    train.dwelling_station_id = nearest.station_id
-                    train.dwell_until_s = self.sim_time_s + stop.dwell_time_s
-                else:
-                    new_pos -= train.sign * 0.01
-
+                    train.dwelling_station_id = nearest.station_id; train.dwell_until_s = self.sim_time_s + stop.dwell_time_s
+                else: new_pos -= train.sign * 0.01
         train.route_position_m = max(0.0, min(self.config.route.total_length_m, new_pos))
+        crossover_reason = self._apply_track_change(train, old_pos, train.route_position_m)
+        if crossover_reason and action != "STOP": reason = crossover_reason
         train.speed_kmh = ms_to_kmh(new_v)
         train.acceleration_ms2 = 0.0 if train.completed else accel
         return action, reason
 
     def tick(self) -> list[TelemetryFrame]:
-        if self.is_complete:
-            return []
+        if self.is_complete: return []
         dt = self.config.simulation.tick_seconds
         actions = {t.train.train_id: self._advance(t, dt) for t in self.trains}
-        self.tick_count += 1
-        self.sim_time_s += dt
+        self.tick_count += 1; self.sim_time_s += dt
         return [self.snapshot_train(t, *actions[t.train.train_id]) for t in self.trains]
 
     def snapshot_all(self) -> list[TelemetryFrame]:
@@ -311,17 +300,12 @@ class NetworkSimulationEngine:
         ceiling, weather, visibility = self._current_ceiling(train)
         distance = max(0.0, (train.destination_m - train.route_position_m) * train.sign)
         progress = min(1.0, abs(train.route_position_m - train.source_m) / max(1e-6, abs(train.destination_m - train.source_m)))
-
         next_signals = []
         for signal in self.config.signals:
-            if signal.track_id != train.train.track_id or signal.direction != train.direction:
-                continue
-            pos = self._signal_position(signal)
-            d = self._ahead(train, pos)
-            if d is not None and d > 1e-6:
-                next_signals.append((d, self.signal_aspect(signal, exclude=train)))
+            if signal.track_id != train.current_track_id or signal.direction != train.direction: continue
+            pos = self._signal_position(signal); d = self._ahead(train, pos)
+            if d is not None and d > 1e-6: next_signals.append((d, self.signal_aspect(signal, exclude=train)))
         next_signals.sort(key=lambda x: x[0])
-
         next_speed = next_speed_d = next_curve = next_curve_d = None
         future_indices = range(idx + 1, len(self.config.route.blocks)) if train.sign > 0 else range(idx - 1, -1, -1)
         for i in future_indices:
@@ -329,63 +313,36 @@ class NetworkSimulationEngine:
             start = self.config.route.block_start_distance_m(future.block_id)
             boundary = start if train.sign > 0 else start + future.length_m
             d = max(0.0, (boundary - train.route_position_m) * train.sign)
-            if next_speed is None and future.speed_limit_kmh != block.speed_limit_kmh:
-                next_speed, next_speed_d = future.speed_limit_kmh, d
-            if next_curve is None and future.curve_speed_limit_kmh is not None:
-                next_curve, next_curve_d = future.curve_speed_limit_kmh, d
-
+            if next_speed is None and future.speed_limit_kmh != block.speed_limit_kmh: next_speed, next_speed_d = future.speed_limit_kmh, d
+            if next_curve is None and future.curve_speed_limit_kmh is not None: next_curve, next_curve_d = future.curve_speed_limit_kmh, d
         next_tsr = None
         for r in self.config.environment.temporary_speed_restrictions:
-            if not self._restriction_active(r):
-                continue
+            if not self._restriction_active(r): continue
             start = self.config.route.block_start_distance_m(r.block_id)
             pos = start + (r.start_position_m if train.sign > 0 else r.end_position_m)
             d = self._ahead(train, pos)
-            if d is not None and (next_tsr is None or d < next_tsr[0]):
-                next_tsr = (d, r.speed_limit_kmh)
-
+            if d is not None and (next_tsr is None or d < next_tsr[0]): next_tsr = (d, r.speed_limit_kmh)
         next_crossing = None
         for c in self.config.environment.crossings:
             pos = self.config.route.block_start_distance_m(c.block_id) + c.position_in_block_m
             d = self._ahead(train, pos)
-            if d is not None and (next_crossing is None or d < next_crossing[0]):
-                next_crossing = (d, self._crossing_state(c))
-
+            if d is not None and (next_crossing is None or d < next_crossing[0]): next_crossing = (d, self._crossing_state(c))
         return TelemetryFrame(
-            scenario_id=self.scenario_id,
-            train_id=train.train.train_id,
-            tick=self.tick_count,
-            sim_time_s=self.sim_time_s,
-            track_id=train.train.track_id,
-            direction=train.direction,
-            active=self.sim_time_s >= train.departure_time_s and not train.completed,
-            completed=train.completed,
-            current_station_id=train.dwelling_station_id,
-            current_block_id=block.block_id,
-            position_in_block_m=local,
-            route_position_m=train.route_position_m,
-            speed_kmh=train.speed_kmh,
-            acceleration_ms2=train.acceleration_ms2,
-            control_action=action,
-            control_reason=reason,
-            current_block_speed_limit_kmh=block.speed_limit_kmh,
-            current_gradient_percent=block.gradient_percent,
-            current_curve_speed_limit_kmh=block.curve_speed_limit_kmh,
-            effective_speed_ceiling_kmh=ceiling,
-            weather=weather,
-            visibility_m=visibility,
-            distance_to_destination_m=distance,
-            route_progress=progress,
+            scenario_id=self.scenario_id, train_id=train.train.train_id, tick=self.tick_count, sim_time_s=self.sim_time_s,
+            track_id=train.current_track_id, direction=train.direction,
+            active=self.sim_time_s >= train.departure_time_s and not train.completed, completed=train.completed,
+            current_station_id=train.dwelling_station_id, current_block_id=block.block_id, position_in_block_m=local,
+            route_position_m=train.route_position_m, speed_kmh=train.speed_kmh, acceleration_ms2=train.acceleration_ms2,
+            control_action=action, control_reason=reason, current_block_speed_limit_kmh=block.speed_limit_kmh,
+            current_gradient_percent=block.gradient_percent, current_curve_speed_limit_kmh=block.curve_speed_limit_kmh,
+            effective_speed_ceiling_kmh=ceiling, weather=weather, visibility_m=visibility,
+            distance_to_destination_m=distance, route_progress=progress,
             next_signal_aspect=next_signals[0][1] if len(next_signals) > 0 else None,
             distance_to_next_signal_m=next_signals[0][0] if len(next_signals) > 0 else None,
             second_signal_aspect=next_signals[1][1] if len(next_signals) > 1 else None,
             distance_to_second_signal_m=next_signals[1][0] if len(next_signals) > 1 else None,
-            next_speed_limit_kmh=next_speed,
-            distance_to_next_speed_change_m=next_speed_d,
-            next_curve_limit_kmh=next_curve,
-            distance_to_next_curve_m=next_curve_d,
-            next_tsr_limit_kmh=next_tsr[1] if next_tsr else None,
-            distance_to_next_tsr_m=next_tsr[0] if next_tsr else None,
-            next_crossing_state=next_crossing[1] if next_crossing else None,
-            distance_to_next_crossing_m=next_crossing[0] if next_crossing else None,
+            next_speed_limit_kmh=next_speed, distance_to_next_speed_change_m=next_speed_d,
+            next_curve_limit_kmh=next_curve, distance_to_next_curve_m=next_curve_d,
+            next_tsr_limit_kmh=next_tsr[1] if next_tsr else None, distance_to_next_tsr_m=next_tsr[0] if next_tsr else None,
+            next_crossing_state=next_crossing[1] if next_crossing else None, distance_to_next_crossing_m=next_crossing[0] if next_crossing else None,
         )
