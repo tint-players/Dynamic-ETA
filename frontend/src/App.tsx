@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { connectSimulation, createSession, sendCommand } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
 import type {
+  ExportPaths,
   PlaybackState,
   SessionCreateResponse,
   SimulatorConfigViz,
@@ -78,6 +79,7 @@ export default function App() {
   const [history, setHistory] = useState<TelemetryFrame[]>([])
   const [events, setEvents] = useState<DebugEvent[]>([])
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
+  const [exportPaths, setExportPaths] = useState<ExportPaths | null>(null)
   const [connection, setConnection] = useState('connecting')
   const [error, setError] = useState<string | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
@@ -105,6 +107,7 @@ export default function App() {
               if (isReset) {
                 setHistory([next])
                 setEvents([{ id: 'reset-0', time: 0, text: 'Simulation reset' }])
+                setExportPaths(null)
               } else {
                 setHistory((items) => {
                   if (items.at(-1)?.tick === next.tick && items.at(-1)?.sim_time_s === next.sim_time_s) return items
@@ -121,6 +124,16 @@ export default function App() {
                 playback_speed: message.playback_speed,
                 complete: message.complete,
               })
+            } else if (message.type === 'export_complete') {
+              setExportPaths(message.paths)
+              setEvents((items) => [
+                ...items,
+                {
+                  id: `export-${message.paths.csv}`,
+                  time: previousFrameRef.current?.sim_time_s ?? 0,
+                  text: `Dataset exported: ${message.paths.csv} and ${message.paths.parquet}`,
+                },
+              ].slice(-250))
             } else if (message.type === 'error') {
               setError(message.message)
             }
@@ -165,6 +178,7 @@ export default function App() {
         history={history}
         events={events}
         playback={playback}
+        exportPaths={exportPaths}
         connection={connection}
         onPlay={() => sendCommand(socketRef.current, 'play')}
         onPause={() => sendCommand(socketRef.current, 'pause')}
