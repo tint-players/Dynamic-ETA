@@ -6,13 +6,14 @@ from .network_engine_v4 import NetworkSimulationEngineV4
 
 
 class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
-    """V4 network engine with a conservative three-aspect approach-speed rule.
+    """V4 network engine with conservative restrictive-signal approach control.
 
     The existing v4 RED stop targets, crossing protection, separation and
-    crossover interlocking remain unchanged. This layer only prevents a train
-    from accelerating back toward line speed while the governing signal is
-    YELLOW, and keeps that caution speed after passing a YELLOW while the next
-    signal remains restrictive.
+    crossover interlocking remain unchanged. This layer prevents a train from
+    accelerating back toward line speed while the governing signal is YELLOW,
+    keeps that caution speed after passing a YELLOW while the next signal remains
+    restrictive, and preserves configured station-stop order for turnaround
+    trains so an itinerary can continue naturally onto the return leg.
     """
 
     YELLOW_APPROACH_SPEED_KMH = 60.0
@@ -52,6 +53,25 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
                     return previous_signal
 
         return None
+
+    def _targets(self, train: RuntimeTrain):
+        targets = super()._targets(train)
+        if not any(plan.reverse_after_change for plan in train.track_changes):
+            return targets
+
+        next_stop = next(
+            (stop for stop in train.station_stops if stop.station_id not in train.served_stations),
+            None,
+        )
+        if next_stop is None:
+            return targets
+
+        next_station_reason = f"STATION:{next_stop.station_id}"
+        return [
+            target
+            for target in targets
+            if not target.reason.startswith("STATION:") or target.reason == next_station_reason
+        ]
 
     def _desired_speed(
         self,
