@@ -35,6 +35,21 @@ h2 { margin: 0; font-size: 1rem; }
 .connection.open { color: #86efac; }
 .connection.error, .connection.closed { color: #fda4af; }
 
+.injection-panel { margin-bottom: 14px; overflow: hidden; }
+.small-eyebrow { margin-bottom: 4px; font-size: .62rem; }
+.injection-note { margin: 2px 18px 14px; color: #8fa2b9; font-size: .74rem; line-height: 1.5; }
+.inject-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 0 14px 14px; }
+.inject-card { display: grid; gap: 10px; padding: 14px; background: #0b1727; border: 1px solid #26384f; border-radius: 11px; }
+.inject-card-heading { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.inject-card-heading strong { font-size: .84rem; }
+.inject-card-heading span { color: #72869e; font-size: .64rem; text-transform: uppercase; letter-spacing: .06em; }
+.inject-card label { display: grid; gap: 5px; color: #899db5; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
+.inject-card select, .inject-card input { width: 100%; min-width: 0; border: 1px solid #31445d; background: #0d1d30; color: #e5edf7; border-radius: 8px; padding: 8px 9px; outline: none; }
+.inject-card select:focus, .inject-card input:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.12); }
+.inject-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.inject-card button { border: 1px solid #27739b; background: #0d3148; color: #9bdcff; border-radius: 8px; padding: 9px 10px; cursor: pointer; font-weight: 750; }
+.inject-card button:hover:not(:disabled) { border-color: #38bdf8; background: #10405d; }
+
 .route-panel { margin-bottom: 14px; overflow: hidden; }
 .route-scroll { overflow-x: auto; overflow-y: hidden; padding: 6px 18px 22px; }
 .route-canvas { min-width: 1400px; height: 260px; position: relative; margin: 8px 30px 0; }
@@ -109,6 +124,7 @@ h2 { margin: 0; font-size: 1rem; }
 @media (max-width: 1000px) {
   .two-column { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inject-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -118,4 +134,5 @@ h2 { margin: 0; font-size: 1rem; }
   .connection { width: 100%; margin-left: 0; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .route-canvas { min-width: 1100px; }
+  .inject-pair { grid-template-columns: 1fr; }
 }
