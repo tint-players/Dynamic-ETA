@@ -74,7 +74,6 @@ def test_reverse_red_signal_stop_line_is_before_post_in_reverse_direction():
     blocker.completed = False
     blocker.departure_time_s = 0
     blocker.current_track_id = "TRACK-DOWN"
-    blocker.direction = train.direction
     blocker.route_position_m = signal_position - 300.0
     blocker.source_m = blocker.route_position_m
     blocker.destination_m = 0.0
