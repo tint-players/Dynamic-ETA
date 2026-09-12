@@ -13,6 +13,7 @@ from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
 from simulator.models import (
     BlockWeatherSchedule,
     MaintenanceRestriction,
+    SignalAspect,
     SimulationConfig,
     TelemetryFrame,
     TemporarySpeedRestriction,
@@ -56,8 +57,6 @@ class SimulationSession:
     baseline_config: SimulationConfig = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # Keep an immutable-in-practice copy of the YAML baseline so Reset always
-        # returns to the clean scenario rather than replaying live injections.
         self.baseline_config = self.config.model_copy(deep=True)
         if not self.frames:
             self.frames = self.snapshots()
@@ -100,13 +99,19 @@ class SimulationSession:
         if schedule is None:
             schedule = BlockWeatherSchedule(block_id=block_id, timeline=[entry])
             self.config.environment.weather.append(schedule)
-            # Network engine caches the schedule object by block ID.
             if hasattr(self.engine, "_weather"):
                 self.engine._weather[block_id] = schedule
         else:
             schedule.timeline.append(entry)
             schedule.timeline.sort(key=lambda item: item.start_time_s)
         return f"Weather {condition.value} applied to {block_id} at {start_time_s:.0f}s"
+
+    def inject_signal(self, signal_id: str, aspect: SignalAspect, duration_s: float | None) -> str:
+        if not isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
+            raise ValueError("Manual signal injection requires the restrictive network engine")
+        self.engine.set_manual_signal_override(signal_id, aspect, duration_s)
+        duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
+        return f"Signal {signal_id} forced to {aspect.value} {duration_text}"
 
     def inject_speed_restriction(
         self,
