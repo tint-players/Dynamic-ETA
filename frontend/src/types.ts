@@ -213,6 +213,10 @@ export type ManualInjectionRequest =
       duration_s: number | null
     }
   | {
+      command: 'reset_signal'
+      signal_id: string
+    }
+  | {
       command: 'inject_tsr' | 'inject_maintenance'
       block_id: string
       start_position_m: number
