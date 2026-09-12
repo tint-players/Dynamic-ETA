@@ -9,7 +9,7 @@ from uuid import uuid4
 from simulator.config_loader import load_simulation_config
 from simulator.dataset import label_completed_journey, label_completed_multi_train_journey
 from simulator.engine import SimulationEngine
-from simulator.exporters import BatchExporter
+from simulator.exporters import BatchExporter, ParquetTelemetryExporter
 from simulator.models import SimulationConfig, TelemetryFrame
 from simulator.network_engine_v4 import NetworkSimulationEngineV4
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
@@ -83,13 +83,15 @@ class SimulationSession:
 
     def _export_completed_journey(self) -> dict[str, str]:
         labelled = label_completed_multi_train_journey(self.frames) if self.is_multi_train else label_completed_journey(self.frames)
-        exporter = BatchExporter()
-        exporter.add(labelled)
+        csv_exporter = BatchExporter()
+        csv_exporter.add(labelled)
+        parquet_exporter = ParquetTelemetryExporter(self.config)
+
         stem = f"{self.scenario_id}_{self.session_id[:8]}"
         csv_path = OUTPUT_DIR / f"{stem}.csv"
         parquet_path = OUTPUT_DIR / f"{stem}.parquet"
-        exporter.to_csv(csv_path)
-        exporter.to_parquet(parquet_path)
+        csv_exporter.to_csv(csv_path)
+        parquet_exporter.to_parquet(labelled, parquet_path)
         return {"csv": _display_path(csv_path), "parquet": _display_path(parquet_path)}
 
     def reset(self) -> list[TelemetryFrame]:
