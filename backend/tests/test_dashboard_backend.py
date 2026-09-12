@@ -160,20 +160,21 @@ def test_up06_forced_red_stops_up_train_before_signal():
     assert engine.signal_aspect(signal, exclude=follower) == SignalAspect.RED
     red_targets = [target for target in engine._targets(follower) if target.reason == "RED_SIGNAL:UP-06"]
     assert len(red_targets) == 1
-    assert red_targets[0].position_m == signal_position
+    expected_stop = signal_position - engine.SIGNAL_STOP_MARGIN_M
+    assert red_targets[0].position_m == expected_stop
 
     for _ in range(120):
         old_position = follower.route_position_m
         if follower.completed:
             break
         engine.tick()
-        assert follower.route_position_m <= signal_position + 1e-6
-        if abs(follower.route_position_m - signal_position) <= 0.02:
+        assert follower.route_position_m <= expected_stop + 1e-6
+        if abs(follower.route_position_m - expected_stop) <= 0.02:
             assert follower.speed_kmh == 0.0
             break
         assert follower.route_position_m >= old_position - 1e-6
     else:
-        raise AssertionError("TRAIN-12002 never reached the UP-06 red-signal stop point")
+        raise AssertionError("TRAIN-12002 never reached the UP-06 protected stop line")
 
 
 def test_level_crossing_closes_for_approach_and_stop_target_is_before_road():
