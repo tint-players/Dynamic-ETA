@@ -1,6 +1,6 @@
 .realistic-route-panel { overflow: hidden; }
-.realistic-route-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 14px 12px; }
-.realistic-route { min-width: 1180px; width: 100%; height: auto; display: block; }
+.realistic-route-scroll { overflow-x: auto; overflow-y: hidden; padding: 0 14px 12px; scrollbar-gutter: stable; }
+.realistic-route { min-width: 3200px; width: 3200px; max-width: none; height: auto; display: block; }
 .block-boundary { stroke: #31445c; stroke-width: 1; stroke-dasharray: 5 7; opacity: .55; }
 .track-ballast-path { fill: none; stroke: #475569; stroke-width: 18; stroke-linecap: round; stroke-linejoin: round; opacity: .72; }
 .track-bed-path { fill: none; stroke: #1f2937; stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
@@ -39,11 +39,14 @@
 .svg-train-position.selected .svg-train-body { filter: drop-shadow(0 0 9px #f8fafc); }
 .svg-train-position.selected .train-speed-label { fill: #fff; font-size: 10px; }
 .svg-train-body { transform-box: fill-box; transform-origin: center; }
-.svg-train-body rect, .svg-train-body path { fill: #38bdf8; stroke: #bae6fd; stroke-width: 1; filter: drop-shadow(0 0 8px rgba(56,189,248,.7)); }
-.train-1 .svg-train-body rect, .train-1 .svg-train-body path { fill: #a78bfa; }
-.train-2 .svg-train-body rect, .train-2 .svg-train-body path { fill: #34d399; }
-.train-3 .svg-train-body rect, .train-3 .svg-train-body path { fill: #fb7185; }
-.svg-train-body .train-window { fill: #082f49; stroke: #bae6fd; stroke-width: .7; }
+.svg-train-body .train-coach-shell, .svg-train-body .train-cab { fill: #38bdf8; stroke: #bae6fd; stroke-width: 1; filter: drop-shadow(0 0 6px rgba(56,189,248,.62)); }
+.train-1 .svg-train-body .train-coach-shell, .train-1 .svg-train-body .train-cab { fill: #a78bfa; }
+.train-2 .svg-train-body .train-coach-shell, .train-2 .svg-train-body .train-cab { fill: #34d399; }
+.train-3 .svg-train-body .train-coach-shell, .train-3 .svg-train-body .train-cab { fill: #fb7185; }
+.svg-train-body .train-window { fill: #082f49; stroke: #d8f3ff; stroke-width: .7; }
+.svg-train-body .train-door { fill: rgba(8,47,73,.72); stroke: #d8f3ff; stroke-width: .6; }
+.svg-train-body .train-gangway { fill: #0f172a; stroke: #94a3b8; stroke-width: .7; filter: none; }
+.svg-train-body .train-roof-line { stroke: rgba(255,255,255,.8); stroke-width: 1.1; stroke-linecap: round; }
 .svg-train-body circle { fill: #06101c; stroke: #94a3b8; stroke-width: .8; }
 .train-speed-label { fill: #e0f2fe; font-size: 9px; font-weight: 900; paint-order: stroke; stroke: #07111b; stroke-width: 3px; stroke-linejoin: round; }
 .endpoint-svg-label { fill: #75879c; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
@@ -60,4 +63,4 @@
 .fleet-card b { color: #7dd3fc; font-size: .9rem; }
 
 @media (max-width: 1000px) { .fleet-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-@media (max-width: 680px) { .realistic-route { min-width: 1050px; } .fleet-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .realistic-route { min-width: 3000px; width: 3000px; } .fleet-grid { grid-template-columns: 1fr; } }
