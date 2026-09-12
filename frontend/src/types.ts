@@ -171,6 +171,12 @@ export type ManualInjectionRequest =
       visibility_m: number
     }
   | {
+      command: 'inject_signal'
+      signal_id: string
+      aspect: SignalAspect
+      duration_s: number | null
+    }
+  | {
       command: 'inject_tsr' | 'inject_maintenance'
       block_id: string
       start_position_m: number
