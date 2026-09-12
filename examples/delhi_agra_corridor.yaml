@@ -138,8 +138,8 @@ stations:
   - station_id: "FARAH"
     station_name: "Farah"
     platforms:
-      - {platform_id: "FAR-UP", track_id: "TRACK-UP", block_id: "BLK-05", position_in_block_m: 1450, length_m: 330}
-      - {platform_id: "FAR-DN", track_id: "TRACK-DOWN", block_id: "BLK-05", position_in_block_m: 1450, length_m: 330}
+      - {platform_id: "FAR-UP", track_id: "TRACK-UP", block_id: "BLK-05", position_in_block_m: 1450, length_m: 450}
+      - {platform_id: "FAR-DN", track_id: "TRACK-DOWN", block_id: "BLK-05", position_in_block_m: 1450, length_m: 450}
   - station_id: "AGRA-CANTT"
     station_name: "Agra Cantt"
     platforms:
@@ -172,7 +172,7 @@ environment:
   crossings:
     - crossing_id: "XING-001"
       block_id: "BLK-05"
-      position_in_block_m: 1700
+      position_in_block_m: 2350
       timeline:
         - {start_time_s: 0, state: "OPEN_FOR_TRAIN"}
         - {start_time_s: 300, state: "CLOSED_FOR_TRAIN"}
