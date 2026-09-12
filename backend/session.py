@@ -55,6 +55,7 @@ class SimulationSession:
     frames: list[TelemetryFrame] = field(default_factory=list)
     export_paths: dict[str, str] | None = None
     baseline_config: SimulationConfig = field(init=False, repr=False)
+    manual_weather_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.baseline_config = self.config.model_copy(deep=True)
@@ -86,25 +87,48 @@ class SimulationSession:
     def _block(self, block_id: str):
         return next((block for block in self.config.route.blocks if block.block_id == block_id), None)
 
-    def inject_weather(self, block_id: str, condition: WeatherCondition, visibility_m: float) -> str:
+    def _refresh_weather_cache(self) -> None:
+        if hasattr(self.engine, "_weather"):
+            self.engine._weather = {item.block_id: item for item in self.config.environment.weather}
+
+    def inject_weather(
+        self,
+        block_id: str,
+        condition: WeatherCondition,
+        visibility_m: float,
+        duration_s: float | None,
+    ) -> str:
         if self._block(block_id) is None:
             raise ValueError(f"Unknown block_id: {block_id}")
+
         start_time_s = self.engine.sim_time_s
+        end_time_s = start_time_s + duration_s if duration_s is not None else None
         schedule = next((item for item in self.config.environment.weather if item.block_id == block_id), None)
-        entry = WeatherTimelineEntry(
-            start_time_s=start_time_s,
-            condition=condition,
-            visibility_m=visibility_m,
-        )
+        entry = WeatherTimelineEntry(start_time_s=start_time_s, condition=condition, visibility_m=visibility_m)
         if schedule is None:
             schedule = BlockWeatherSchedule(block_id=block_id, timeline=[entry])
             self.config.environment.weather.append(schedule)
-            if hasattr(self.engine, "_weather"):
-                self.engine._weather[block_id] = schedule
         else:
             schedule.timeline.append(entry)
-            schedule.timeline.sort(key=lambda item: item.start_time_s)
-        return f"Weather {condition.value} applied to {block_id} at {start_time_s:.0f}s"
+
+        if end_time_s is not None:
+            schedule.timeline.append(WeatherTimelineEntry(
+                start_time_s=end_time_s,
+                condition=WeatherCondition.CLEAR,
+                visibility_m=10000,
+            ))
+
+        schedule.timeline.sort(key=lambda item: item.start_time_s)
+        self._refresh_weather_cache()
+        self.manual_weather_overrides[block_id] = {
+            "block_id": block_id,
+            "condition": condition.value,
+            "visibility_m": visibility_m,
+            "start_time_s": start_time_s,
+            "end_time_s": end_time_s,
+        }
+        duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
+        return f"Weather {condition.value} applied to {block_id} {duration_text}"
 
     def inject_signal(self, signal_id: str, aspect: SignalAspect, duration_s: float | None) -> str:
         if not isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
@@ -165,6 +189,59 @@ class SimulationSession:
             f"{start_position_m:g}-{end_position_m:g}m at {speed_limit_kmh:g} km/h {duration_text}"
         )
 
+    def active_constraints(self) -> dict[str, Any]:
+        sim_time_s = self.engine.sim_time_s
+        expired_weather = [
+            block_id
+            for block_id, item in self.manual_weather_overrides.items()
+            if item["end_time_s"] is not None and sim_time_s >= item["end_time_s"]
+        ]
+        for block_id in expired_weather:
+            self.manual_weather_overrides.pop(block_id, None)
+
+        weather = [dict(item) for item in self.manual_weather_overrides.values()]
+        tsr = [
+            restriction.model_dump(mode="json")
+            for restriction in self.config.environment.temporary_speed_restrictions
+            if restriction.restriction_id.startswith("TSR-MANUAL-")
+            and restriction.start_time_s <= sim_time_s
+            and (restriction.end_time_s is None or sim_time_s < restriction.end_time_s)
+        ]
+        maintenance = [
+            restriction.model_dump(mode="json")
+            for restriction in self.config.environment.maintenance_restrictions
+            if restriction.restriction_id.startswith("MAINT-MANUAL-")
+            and restriction.start_time_s <= sim_time_s
+            and (restriction.end_time_s is None or sim_time_s < restriction.end_time_s)
+        ]
+        signals: list[dict[str, Any]] = []
+        if isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
+            for signal_id, (aspect, end_time_s) in self.engine.manual_signal_override_details().items():
+                signals.append({
+                    "signal_id": signal_id,
+                    "aspect": aspect.value,
+                    "start_time_s": None,
+                    "end_time_s": end_time_s,
+                })
+        return {
+            "sim_time_s": sim_time_s,
+            "weather": weather,
+            "tsr": tsr,
+            "maintenance": maintenance,
+            "signals": signals,
+        }
+
+    def reset_constraints(self) -> None:
+        baseline_environment = self.baseline_config.environment.model_copy(deep=True)
+        self.config.environment.weather = baseline_environment.weather
+        self.config.environment.temporary_speed_restrictions = baseline_environment.temporary_speed_restrictions
+        self.config.environment.maintenance_restrictions = baseline_environment.maintenance_restrictions
+        self.config.environment.signal_states = baseline_environment.signal_states
+        self.manual_weather_overrides.clear()
+        self._refresh_weather_cache()
+        if isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
+            self.engine.clear_manual_signal_overrides()
+
     def tick(self) -> list[TelemetryFrame]:
         with self.lock:
             frames = self.engine.tick()
@@ -204,6 +281,7 @@ class SimulationSession:
         with self.lock:
             self.config = self.baseline_config.model_copy(deep=True)
             self.engine = _new_engine(self.config, self.scenario_id)
+            self.manual_weather_overrides.clear()
             self.playing = False
             self.playback_speed = 1.0
             frames = self.snapshots()
