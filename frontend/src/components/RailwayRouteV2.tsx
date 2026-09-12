@@ -12,6 +12,8 @@ const BASE_Y = 220
 const TRACK_SPACING = 24
 const PATH_SAMPLES = 760
 const COACH_GAP_PX = 4
+const PLATFORM_OFFSET_PX = 31
+const STATION_LABEL_OFFSET_PX = 55
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 1.25
 const ZOOM_STEP = 0.1
@@ -116,6 +118,14 @@ function poseAt(config: SimulatorConfigViz, routePositionM: number, trackIdx: nu
   }
 }
 
+function offsetPose(pose: Pose, lateralOffsetPx: number): Point {
+  const angle = pose.angleDeg * Math.PI / 180
+  return {
+    x: pose.x - Math.sin(angle) * lateralOffsetPx,
+    y: pose.y + Math.cos(angle) * lateralOffsetPx,
+  }
+}
+
 function trackIndex(config: SimulatorConfigViz, trackId: string): number {
   const i = config.route.track_ids.indexOf(trackId)
   return i >= 0 ? i : 0
@@ -134,6 +144,17 @@ function pathBetween(config: SimulatorConfigViz, startM: number, endM: number, t
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
 }
 
+function offsetPathBetween(config: SimulatorConfigViz, startM: number, endM: number, trackIdx: number, lateralOffsetPx: number): string {
+  const span = Math.max(1, endM - startM)
+  const count = Math.max(10, Math.ceil((span / config.route.total_length_m) * PATH_SAMPLES))
+  const points: Point[] = []
+  for (let i = 0; i <= count; i += 1) {
+    const routePositionM = startM + span * i / count
+    points.push(offsetPose(poseAt(config, routePositionM, trackIdx), lateralOffsetPx))
+  }
+  return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
+}
+
 function fullTrackPath(config: SimulatorConfigViz, trackIdx: number): string {
   return pathBetween(config, 0, config.route.total_length_m, trackIdx)
 }
@@ -141,11 +162,6 @@ function fullTrackPath(config: SimulatorConfigViz, trackIdx: number): string {
 function signalFallback(config: SimulatorConfigViz, signalId: string, simTime: number): SignalAspect {
   const schedule = config.environment.signal_states.find((item) => item.signal_id === signalId)
   return activeAt(schedule?.timeline ?? [], simTime)?.aspect ?? 'GREEN'
-}
-
-function stationLabelOffset(stationId: string): { x: number; y: number } {
-  if (stationId === 'MATHURA') return { x: -42, y: -66 }
-  return { x: 0, y: -62 }
 }
 
 function displayPoseAt(config: SimulatorConfigViz, frame: TelemetryFrame, routePositionM: number): Pose {
@@ -181,6 +197,10 @@ function clampZoom(value: number): number {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value))
 }
 
+function snapHalf(value: number): number {
+  return Math.round(value * 2) / 2
+}
+
 export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain }: {
   config: SimulatorConfigViz
   frames: TelemetryFrame[]
@@ -202,7 +222,6 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
   }
 
   const resetZoom = () => setZoom(1)
-  const platformLengthPx = Math.max(120, metersToPixels(config, 390))
 
   return (
     <section className="panel route-panel realistic-route-panel">
@@ -220,13 +239,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
       </div>
 
       <div className="realistic-route-scroll" ref={scrollRef}>
-        <svg
-          className="realistic-route"
-          style={{ width: `${WIDTH * zoom}px` }}
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          role="img"
-          aria-label="Multi-train curved railway network"
-        >
+        <svg className="realistic-route" style={{ width: `${WIDTH * zoom}px` }} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Multi-train curved railway network">
           {blocks.slice(1).map(({ block }) => {
             const p = pointAt(config, block.route_start_m, 0)
             return <line key={block.block_id} x1={p.x} y1={50} x2={p.x} y2={HEIGHT - 48} className="block-boundary" />
@@ -253,21 +266,25 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
           })}
 
           {config.stations.map((station) => {
-            const labelOffset = stationLabelOffset(station.station_id)
+            const labelPlatform = station.platforms[0]
+            const labelTrackIdx = trackIndex(config, labelPlatform.track_id)
+            const labelPose = poseAt(config, labelPlatform.route_position_m, labelTrackIdx)
+            const labelPoint = offsetPose(labelPose, -STATION_LABEL_OFFSET_PX)
+
             return <g key={station.station_id} className="svg-station">
               {station.platforms.map((platform) => {
                 const idx = trackIndex(config, platform.track_id)
-                const p = poseAt(config, platform.route_position_m, idx)
                 const side = idx === 0 ? -1 : 1
-                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}>
-                  <rect x={-platformLengthPx / 2} y={side < 0 ? -38 : 24} width={platformLengthPx} height="14" rx="4" />
-                  <line x1={-platformLengthPx / 2 + 8} y1={side < 0 ? -31 : 31} x2={platformLengthPx / 2 - 8} y2={side < 0 ? -31 : 31} className="platform-edge" />
+                const halfLengthM = platform.length_m / 2
+                const startM = platform.route_position_m - halfLengthM
+                const endM = platform.route_position_m + halfLengthM
+                const d = offsetPathBetween(config, startM, endM, idx, side * PLATFORM_OFFSET_PX)
+                return <g key={platform.platform_id} className="svg-platform">
+                  <path d={d} className="platform-surface" />
+                  <path d={d} className="platform-edge" />
                 </g>
               })}
-              {(() => {
-                const p = poseAt(config, station.platforms[0].route_position_m, 0)
-                return <g transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><text x={labelOffset.x} y={labelOffset.y} textAnchor="middle">▰ {station.station_name}</text></g>
-              })()}
+              <text x={labelPoint.x} y={labelPoint.y} textAnchor="middle" className="station-label">▰ {station.station_name}</text>
             </g>
           })}
 
@@ -311,6 +328,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             const compartmentLengthM = trainLengthM / compartmentCount
             const coachWidthPx = Math.max(26, metersToPixels(config, compartmentLengthM) - COACH_GAP_PX)
             const frontPose = displayPoseAt(config, frame, frame.route_position_m)
+            const labelX = snapHalf(frontPose.x)
+            const labelY = snapHalf(frontPose.y - 34)
 
             return <g key={frame.train_id} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
               {Array.from({ length: compartmentCount }, (_, compartmentIndex) => {
@@ -334,7 +353,10 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
                   <circle cx={x + coachWidthPx - Math.min(9, coachWidthPx * .24)} cy="10" r="3" />
                 </g>
               })}
-              <text x={frontPose.x} y={frontPose.y - 28} textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text>
+              <g transform={`translate(${labelX} ${labelY})`} className="train-label-anchor">
+                <rect x="-72" y="-12" width="144" height="20" rx="8" className="train-label-bg" />
+                <text x="0" y="-1" textAnchor="middle" dominantBaseline="middle" className="train-speed-label">{frame.train_id} · {Math.round(frame.speed_kmh)}</text>
+              </g>
             </g>
           })}
 
@@ -345,7 +367,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
       <div className="legend">
         <span>dynamic signals = block occupancy</span>
-        <span>platforms and labels follow track slope</span>
+        <span>platforms follow their configured physical length</span>
         <span>⇄ = physical crossover</span>
         <span>reverse trains stay upright</span>
         <span className="crossing-legend road-open-legend">● road open = train stop before crossing</span>
