@@ -13,7 +13,7 @@ from .session import SimulationSession, sessions
 from .viz import config_for_visualization
 
 
-app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.4.0")
+app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -28,7 +28,7 @@ class CreateSessionRequest(BaseModel):
 
 
 class PlaybackCommand(BaseModel):
-    command: Literal["play", "pause", "reset", "step", "set_speed"]
+    command: Literal["play", "pause", "reset", "reset_constraints", "step", "set_speed"]
     speed: float | None = Field(default=None, gt=0)
 
 
@@ -37,6 +37,7 @@ class WeatherInjectionCommand(BaseModel):
     block_id: str
     condition: WeatherCondition
     visibility_m: float = Field(gt=0)
+    duration_s: float | None = Field(default=300.0, gt=0)
 
 
 class SignalInjectionCommand(BaseModel):
@@ -74,6 +75,10 @@ def _telemetry_message(session: SimulationSession, frames) -> dict:
     }
 
 
+def _constraint_state_message(session: SimulationSession) -> dict:
+    return {"type": "constraint_state", "state": session.active_constraints()}
+
+
 def _export_message(session: SimulationSession) -> dict | None:
     if session.export_paths is None:
         return None
@@ -81,10 +86,7 @@ def _export_message(session: SimulationSession) -> dict | None:
 
 
 def _config_message(session: SimulationSession) -> dict:
-    return {
-        "type": "config_update",
-        "config": config_for_visualization(session.config),
-    }
+    return {"type": "config_update", "config": config_for_visualization(session.config)}
 
 
 @app.get("/api/health")
@@ -113,6 +115,7 @@ def create_session(request: CreateSessionRequest) -> dict:
         "initial_frames": [frame.model_dump(mode="json") for frame in initial_frames],
         "signal_states": session.signal_states(),
         "crossing_states": session.crossing_states(),
+        "constraint_state": session.active_constraints(),
     }
 
 
@@ -124,19 +127,7 @@ def get_session_config(session_id: str) -> dict:
         "scenario_id": session.scenario_id,
         "scenario_name": session.scenario_name,
         "config": config_for_visualization(session.config),
-    }
-
-
-@app.post("/api/sessions/{session_id}/reset")
-def reset_session(session_id: str) -> dict:
-    session = _session_or_404(session_id)
-    frames = session.reset()
-    return {
-        "session_id": session.session_id,
-        "frames": [frame.model_dump(mode="json") for frame in frames],
-        "signal_states": session.signal_states(),
-        "crossing_states": session.crossing_states(),
-        "config": config_for_visualization(session.config),
+        "constraint_state": session.active_constraints(),
     }
 
 
@@ -155,12 +146,17 @@ async def _send_export_if_ready(websocket: WebSocket, session: SimulationSession
         await websocket.send_json(message)
 
 
+async def _send_live_state(websocket: WebSocket, session: SimulationSession, frames) -> None:
+    await websocket.send_json(_telemetry_message(session, frames))
+    await websocket.send_json(_constraint_state_message(session))
+
+
 async def _handle_injection(websocket: WebSocket, session: SimulationSession, payload: dict) -> bool:
     command_name = payload.get("command")
     if command_name == "inject_weather":
         try:
             command = WeatherInjectionCommand.model_validate(payload)
-            message = session.inject_weather(command.block_id, command.condition, command.visibility_m)
+            message = session.inject_weather(command.block_id, command.condition, command.visibility_m, command.duration_s)
         except Exception as exc:
             await websocket.send_json({"type": "error", "message": f"Invalid weather injection: {exc}"})
             return True
@@ -189,13 +185,9 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
     else:
         return False
 
-    await websocket.send_json({
-        "type": "injection_applied",
-        "message": message,
-        "sim_time_s": session.engine.sim_time_s,
-    })
+    await websocket.send_json({"type": "injection_applied", "message": message, "sim_time_s": session.engine.sim_time_s})
     await websocket.send_json(_config_message(session))
-    await websocket.send_json(_telemetry_message(session, session.snapshots()))
+    await _send_live_state(websocket, session, session.snapshots())
     return True
 
 
@@ -223,12 +215,17 @@ async def _handle_command(websocket: WebSocket, session: SimulationSession, payl
     elif command.command == "reset":
         frames = session.reset()
         await websocket.send_json(_config_message(session))
-        await websocket.send_json(_telemetry_message(session, frames))
+        await _send_live_state(websocket, session, frames)
+    elif command.command == "reset_constraints":
+        session.reset_constraints()
+        await websocket.send_json({"type": "constraints_reset", "sim_time_s": session.engine.sim_time_s})
+        await websocket.send_json(_config_message(session))
+        await _send_live_state(websocket, session, session.snapshots())
     elif command.command == "step":
         session.playing = False
         frames = session.tick()
         if frames:
-            await websocket.send_json(_telemetry_message(session, frames))
+            await _send_live_state(websocket, session, frames)
         await _send_export_if_ready(websocket, session)
 
     await _send_state(websocket, session)
@@ -243,7 +240,7 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
         return
 
     await websocket.accept()
-    await websocket.send_json(_telemetry_message(session, session.snapshots()))
+    await _send_live_state(websocket, session, session.snapshots())
     await _send_state(websocket, session)
     await _send_export_if_ready(websocket, session)
 
@@ -257,7 +254,7 @@ async def simulation_websocket(websocket: WebSocket, session_id: str) -> None:
                 except asyncio.TimeoutError:
                     frames = session.tick()
                     if frames:
-                        await websocket.send_json(_telemetry_message(session, frames))
+                        await _send_live_state(websocket, session, frames)
                     if session.engine.is_complete:
                         session.playing = False
                         await _send_export_if_ready(websocket, session)
