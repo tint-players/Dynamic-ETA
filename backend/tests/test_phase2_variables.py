@@ -83,7 +83,7 @@ def test_occupied_platform_adds_station_entry_hold_without_replacing_other_safet
     approaching = next(item for item in engine.trains if item.train.train_id == "TRAIN-12002")
     occupant = next(item for item in engine.trains if item.train.train_id == "TRAIN-CROSS-UP")
     for other in engine.trains:
-        if other not in {approaching, occupant}:
+        if other is not approaching and other is not occupant:
             other.completed = True
 
     block_start = config.route.block_start_distance_m("BLK-03")
