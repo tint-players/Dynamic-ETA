@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { connectSimulation, createSession, sendCommand } from './api'
+import { connectSimulation, createSession, sendCommand, sendInjection } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
 import type { CrossingState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
 
@@ -60,7 +60,7 @@ export default function App() {
               setCrossingStates(message.crossing_states)
               if (isReset) {
                 setHistoryByTrain(Object.fromEntries(nextFrames.map((f) => [f.train_id, [f]])))
-                setEvents([{ id: 'reset-0', time: 0, text: 'Multi-train simulation reset' }])
+                setEvents([{ id: 'reset-0', time: 0, text: 'Simulation reset to clean baseline' }])
                 setExportPaths(null)
               } else {
                 const additions = nextFrames.flatMap((next) => trainEvents(previousFramesRef.current[next.train_id], next))
@@ -77,6 +77,13 @@ export default function App() {
               previousFramesRef.current = Object.fromEntries(nextFrames.map((f) => [f.train_id, f]))
             } else if (message.type === 'playback_state') {
               setPlayback({ playing: message.playing, playback_speed: message.playback_speed, complete: message.complete })
+            } else if (message.type === 'config_update') {
+              setSession((current) => current ? { ...current, config: message.config } : current)
+            } else if (message.type === 'injection_applied') {
+              setEvents((items) => [
+                ...items,
+                { id: `inject-${message.sim_time_s}-${items.length}`, time: message.sim_time_s, text: message.message },
+              ].slice(-400))
             } else if (message.type === 'export_complete') {
               setExportPaths(message.paths)
               const time = Object.values(previousFramesRef.current)[0]?.sim_time_s ?? 0
@@ -122,6 +129,7 @@ export default function App() {
         onReset={() => sendCommand(socketRef.current, 'reset')}
         onStep={() => sendCommand(socketRef.current, 'step')}
         onSpeed={(speed) => sendCommand(socketRef.current, 'set_speed', speed)}
+        onInject={(request) => sendInjection(socketRef.current, request)}
       />
     </>
   )
