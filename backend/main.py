@@ -47,6 +47,11 @@ class SignalInjectionCommand(BaseModel):
     duration_s: float | None = Field(default=60.0, gt=0)
 
 
+class SignalResetCommand(BaseModel):
+    command: Literal["reset_signal"]
+    signal_id: str
+
+
 class SpeedRestrictionInjectionCommand(BaseModel):
     command: Literal["inject_tsr", "inject_maintenance"]
     block_id: str
@@ -166,6 +171,13 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
             message = session.inject_signal(command.signal_id, command.aspect, command.duration_s)
         except Exception as exc:
             await websocket.send_json({"type": "error", "message": f"Invalid signal injection: {exc}"})
+            return True
+    elif command_name == "reset_signal":
+        try:
+            command = SignalResetCommand.model_validate(payload)
+            message = session.reset_signal(command.signal_id)
+        except Exception as exc:
+            await websocket.send_json({"type": "error", "message": f"Invalid signal reset: {exc}"})
             return True
     elif command_name in {"inject_tsr", "inject_maintenance"}:
         try:
