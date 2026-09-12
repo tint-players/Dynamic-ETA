@@ -52,6 +52,11 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
             for signal_id, (aspect, _) in self.manual_signal_override_details().items()
         }
 
+    def clear_manual_signal_override(self, signal_id: str) -> None:
+        if not any(signal.signal_id == signal_id for signal in self.config.signals):
+            raise ValueError(f"Unknown signal_id: {signal_id}")
+        self._manual_signal_overrides.pop(signal_id, None)
+
     def clear_manual_signal_overrides(self) -> None:
         self._manual_signal_overrides.clear()
 
