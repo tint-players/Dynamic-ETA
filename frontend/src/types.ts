@@ -163,12 +163,48 @@ export interface TelemetryFrame {
   total_journey_time_s: number | null
 }
 
+export interface ActiveWeatherConstraint {
+  block_id: string
+  condition: WeatherCondition
+  visibility_m: number
+  start_time_s: number
+  end_time_s: number | null
+}
+
+export interface ActiveRestrictionConstraint {
+  restriction_id: string
+  block_id: string
+  start_position_m: number
+  end_position_m: number
+  speed_limit_kmh: number
+  start_time_s: number
+  end_time_s: number | null
+}
+
+export interface ActiveSignalConstraint {
+  signal_id: string
+  aspect: SignalAspect
+  start_time_s: number | null
+  end_time_s: number | null
+}
+
+export interface ConstraintState {
+  sim_time_s: number
+  weather: ActiveWeatherConstraint[]
+  tsr: ActiveRestrictionConstraint[]
+  maintenance: ActiveRestrictionConstraint[]
+  signals: ActiveSignalConstraint[]
+}
+
+export const EMPTY_CONSTRAINT_STATE: ConstraintState = { sim_time_s: 0, weather: [], tsr: [], maintenance: [], signals: [] }
+
 export type ManualInjectionRequest =
   | {
       command: 'inject_weather'
       block_id: string
       condition: WeatherCondition
       visibility_m: number
+      duration_s: number | null
     }
   | {
       command: 'inject_signal'
@@ -194,6 +230,7 @@ export interface SessionCreateResponse {
   initial_frames: TelemetryFrame[]
   signal_states: Record<string, SignalAspect>
   crossing_states: Record<string, CrossingState>
+  constraint_state: ConstraintState
 }
 
 export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
@@ -203,6 +240,8 @@ export type SocketMessage =
   | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState> }
   | ({ type: 'playback_state' } & PlaybackState)
   | { type: 'config_update'; config: SimulatorConfigViz }
+  | { type: 'constraint_state'; state: ConstraintState }
+  | { type: 'constraints_reset'; sim_time_s: number }
   | { type: 'injection_applied'; message: string; sim_time_s: number }
   | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }
