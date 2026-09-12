@@ -133,9 +133,17 @@ class SimulationSession:
     def inject_signal(self, signal_id: str, aspect: SignalAspect, duration_s: float | None) -> str:
         if not isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
             raise ValueError("Manual signal injection requires the restrictive network engine")
+        if aspect not in {SignalAspect.RED, SignalAspect.YELLOW}:
+            raise ValueError("Manual signal override only supports RED or YELLOW")
         self.engine.set_manual_signal_override(signal_id, aspect, duration_s)
         duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
         return f"Signal {signal_id} forced to {aspect.value} {duration_text}"
+
+    def reset_signal(self, signal_id: str) -> str:
+        if not isinstance(self.engine, NetworkSimulationEngineV4Restrictive):
+            raise ValueError("Manual signal reset requires the restrictive network engine")
+        self.engine.clear_manual_signal_override(signal_id)
+        return f"Signal {signal_id} returned to automatic control"
 
     def inject_speed_restriction(
         self,
