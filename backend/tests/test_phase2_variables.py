@@ -149,3 +149,27 @@ def test_tickwise_enriched_export_and_block_visit_export_keep_separate_granulari
         "station_occupancy_wait_s",
         "traffic_hold_time_s",
     }.issubset(block_visits.columns)
+
+
+def test_session_live_injection_mutates_current_run_and_reset_restores_yaml_baseline():
+    manager = SessionManager()
+    session = manager.create("delhi_agra_corridor.yaml")
+    session.engine.sim_time_s = 40
+
+    session.inject_weather("BLK-02", WeatherCondition.FOG, 900)
+    session.inject_speed_restriction("tsr", "BLK-03", 100, 700, 65, 180)
+    session.inject_speed_restriction("maintenance", "BLK-04", 200, 900, 40, 240)
+
+    weather = next(item for item in session.config.environment.weather if item.block_id == "BLK-02")
+    assert weather.timeline[-1].start_time_s == 40
+    assert weather.timeline[-1].condition == WeatherCondition.FOG
+    assert len(session.config.environment.temporary_speed_restrictions) == 1
+    assert len(session.config.environment.maintenance_restrictions) == 1
+
+    session.reset()
+    weather_after = next(item for item in session.config.environment.weather if item.block_id == "BLK-02")
+    assert len(weather_after.timeline) == 1
+    assert weather_after.timeline[0].condition == WeatherCondition.CLEAR
+    assert session.config.environment.temporary_speed_restrictions == []
+    assert session.config.environment.maintenance_restrictions == []
+    assert session.engine.sim_time_s == 0
