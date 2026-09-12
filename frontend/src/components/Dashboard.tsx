@@ -1,4 +1,6 @@
-import type { CrossingState, ExportPaths, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
+import { useState } from 'react'
+
+import type { CrossingState, ExportPaths, ManualInjectionRequest, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame, WeatherCondition } from '../types'
 import RailwayRouteV2 from './RailwayRouteV2'
 
 export interface DebugEvent { id: string; time: number; text: string }
@@ -21,13 +23,14 @@ interface DashboardProps {
   onReset: () => void
   onStep: () => void
   onSpeed: (speed: number) => void
+  onInject: (request: ManualInjectionRequest) => void
 }
 
 const fmt = (value: number | null | undefined, digits = 1) => value == null ? '—' : value.toFixed(digits)
 
 function SimulationControls({ playback, connection, onPlay, onPause, onReset, onStep, onSpeed }: DashboardProps) {
   const speeds = [0.5, 1, 2, 5, 10]
-  return <section className="controls panel"><div className="transport-buttons"><button onClick={playback.playing ? onPause : onPlay} className="primary">{playback.playing ? 'Pause' : 'Play'}</button><button onClick={onStep} disabled={playback.playing || playback.complete}>Step</button><button onClick={onReset}>Reset</button></div><div className="speed-buttons"><span>Playback</span>{speeds.map((speed) => <button key={speed} className={playback.playback_speed === speed ? 'selected' : ''} onClick={() => onSpeed(speed)}>{speed}×</button>)}</div><div className={`connection ${connection}`}>● {connection}</div></section>
+  return <section className="controls panel"><div className="transport-buttons"><button onClick={playback.playing ? onPause : onPlay} className="primary">{playback.playing ? 'Pause' : 'Play'}</button><button onClick={onStep} disabled={playback.playing || playback.complete}>Step</button><button onClick={onReset}>Reset baseline</button></div><div className="speed-buttons"><span>Playback</span>{speeds.map((speed) => <button key={speed} className={playback.playback_speed === speed ? 'selected' : ''} onClick={() => onSpeed(speed)}>{speed}×</button>)}</div><div className={`connection ${connection}`}>● {connection}</div></section>
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -53,6 +56,62 @@ function FleetPanel({ frames, selectedTrainId, onSelectTrain }: Pick<DashboardPr
           </button>
         ))}
       </div>
+    </section>
+  )
+}
+
+function WeatherInjector({ config, disabled, onInject }: Pick<DashboardProps, 'config' | 'onInject'> & { disabled: boolean }) {
+  const [blockId, setBlockId] = useState(config.route.blocks[0]?.block_id ?? '')
+  const [condition, setCondition] = useState<WeatherCondition>('RAIN')
+  const [visibility, setVisibility] = useState(5000)
+
+  return (
+    <div className="inject-card">
+      <div className="inject-card-heading"><strong>Weather</strong><span>applies immediately</span></div>
+      <label>Block<select value={blockId} onChange={(event) => setBlockId(event.target.value)}>{config.route.blocks.map((block) => <option key={block.block_id} value={block.block_id}>{block.block_id}</option>)}</select></label>
+      <label>Condition<select value={condition} onChange={(event) => setCondition(event.target.value as WeatherCondition)}><option value="CLEAR">CLEAR</option><option value="RAIN">RAIN</option><option value="HEAVY_RAIN">HEAVY RAIN</option><option value="FOG">FOG</option><option value="HEAVY_FOG">HEAVY FOG</option></select></label>
+      <label>Visibility (m)<input type="number" min={1} value={visibility} onChange={(event) => setVisibility(Number(event.target.value))} /></label>
+      <button disabled={disabled || !blockId || visibility <= 0} onClick={() => onInject({ command: 'inject_weather', block_id: blockId, condition, visibility_m: visibility })}>Apply weather now</button>
+    </div>
+  )
+}
+
+function RestrictionInjector({ config, disabled, onInject, kind }: Pick<DashboardProps, 'config' | 'onInject'> & { disabled: boolean; kind: 'tsr' | 'maintenance' }) {
+  const firstBlock = config.route.blocks[0]
+  const [blockId, setBlockId] = useState(firstBlock?.block_id ?? '')
+  const [startM, setStartM] = useState(0)
+  const [endM, setEndM] = useState(firstBlock?.length_m ?? 1)
+  const [limit, setLimit] = useState(kind === 'tsr' ? 70 : 45)
+  const [duration, setDuration] = useState(300)
+  const block = config.route.blocks.find((item) => item.block_id === blockId)
+
+  const selectBlock = (next: string) => {
+    setBlockId(next)
+    const selected = config.route.blocks.find((item) => item.block_id === next)
+    setStartM(0)
+    if (selected) setEndM(selected.length_m)
+  }
+
+  const valid = Boolean(block) && startM >= 0 && endM > startM && endM <= (block?.length_m ?? 0) && limit > 0 && duration > 0
+  const title = kind === 'tsr' ? 'Temporary speed restriction' : 'Maintenance speed limit'
+
+  return (
+    <div className="inject-card">
+      <div className="inject-card-heading"><strong>{title}</strong><span>speed limit only</span></div>
+      <label>Block<select value={blockId} onChange={(event) => selectBlock(event.target.value)}>{config.route.blocks.map((item) => <option key={item.block_id} value={item.block_id}>{item.block_id} · {item.length_m}m</option>)}</select></label>
+      <div className="inject-pair"><label>Start (m)<input type="number" min={0} max={block?.length_m} value={startM} onChange={(event) => setStartM(Number(event.target.value))} /></label><label>End (m)<input type="number" min={1} max={block?.length_m} value={endM} onChange={(event) => setEndM(Number(event.target.value))} /></label></div>
+      <div className="inject-pair"><label>Limit (km/h)<input type="number" min={1} value={limit} onChange={(event) => setLimit(Number(event.target.value))} /></label><label>Duration (s)<input type="number" min={1} value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label></div>
+      <button disabled={disabled || !valid} onClick={() => onInject({ command: kind === 'tsr' ? 'inject_tsr' : 'inject_maintenance', block_id: blockId, start_position_m: startM, end_position_m: endM, speed_limit_kmh: limit, duration_s: duration })}>Apply {kind === 'tsr' ? 'TSR' : 'maintenance limit'} now</button>
+    </div>
+  )
+}
+
+function ManualInjectionPanel({ config, playback, onInject }: Pick<DashboardProps, 'config' | 'playback' | 'onInject'>) {
+  return (
+    <section className="panel injection-panel">
+      <div className="panel-heading"><div><span className="eyebrow small-eyebrow">Phase 2 · manual variables</span><h2>Inject live constraints</h2></div><span>{config.environment.temporary_speed_restrictions.length} TSR · {config.environment.maintenance_restrictions.length} maintenance</span></div>
+      <div className="injection-note">Changes are injected at the current simulation second and are captured in tickwise CSV/Parquet. Traffic, signal conflicts and station occupancy remain derived from train movement. Reset baseline removes all live injections.</div>
+      <div className="inject-grid"><WeatherInjector config={config} disabled={playback.complete} onInject={onInject} /><RestrictionInjector config={config} disabled={playback.complete} onInject={onInject} kind="tsr" /><RestrictionInjector config={config} disabled={playback.complete} onInject={onInject} kind="maintenance" /></div>
     </section>
   )
 }
@@ -84,5 +143,5 @@ function EventLog({ events }: { events: DebugEvent[] }) {
 
 export default function Dashboard(props: DashboardProps) {
   const { config, frame, frames, selectedTrainId, onSelectTrain, signalStates, crossingStates, history, events, playback, exportPaths } = props
-  return <main className="dashboard"><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></header><SimulationControls {...props} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} />{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
+  return <main className="dashboard"><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></header><SimulationControls {...props} /><ManualInjectionPanel config={config} playback={playback} onInject={props.onInject} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} />{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
 }
