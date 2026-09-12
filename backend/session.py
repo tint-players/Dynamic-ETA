@@ -10,7 +10,15 @@ from simulator.config_loader import load_simulation_config
 from simulator.dataset import label_completed_journey, label_completed_multi_train_journey
 from simulator.engine import SimulationEngine
 from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
-from simulator.models import SimulationConfig, TelemetryFrame
+from simulator.models import (
+    BlockWeatherSchedule,
+    MaintenanceRestriction,
+    SimulationConfig,
+    TelemetryFrame,
+    TemporarySpeedRestriction,
+    WeatherCondition,
+    WeatherTimelineEntry,
+)
 from simulator.network_engine_v4 import NetworkSimulationEngineV4
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
 
@@ -45,8 +53,12 @@ class SimulationSession:
     lock: Lock = field(default_factory=Lock)
     frames: list[TelemetryFrame] = field(default_factory=list)
     export_paths: dict[str, str] | None = None
+    baseline_config: SimulationConfig = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # Keep an immutable-in-practice copy of the YAML baseline so Reset always
+        # returns to the clean scenario rather than replaying live injections.
+        self.baseline_config = self.config.model_copy(deep=True)
         if not self.frames:
             self.frames = self.snapshots()
 
@@ -71,6 +83,82 @@ class SimulationSession:
         if self.is_multi_train:
             return {key: value.value for key, value in self.engine.crossing_states().items()}
         return {}
+
+    def _block(self, block_id: str):
+        return next((block for block in self.config.route.blocks if block.block_id == block_id), None)
+
+    def inject_weather(self, block_id: str, condition: WeatherCondition, visibility_m: float) -> str:
+        if self._block(block_id) is None:
+            raise ValueError(f"Unknown block_id: {block_id}")
+        start_time_s = self.engine.sim_time_s
+        schedule = next((item for item in self.config.environment.weather if item.block_id == block_id), None)
+        entry = WeatherTimelineEntry(
+            start_time_s=start_time_s,
+            condition=condition,
+            visibility_m=visibility_m,
+        )
+        if schedule is None:
+            schedule = BlockWeatherSchedule(block_id=block_id, timeline=[entry])
+            self.config.environment.weather.append(schedule)
+            # Network engine caches the schedule object by block ID.
+            if hasattr(self.engine, "_weather"):
+                self.engine._weather[block_id] = schedule
+        else:
+            schedule.timeline.append(entry)
+            schedule.timeline.sort(key=lambda item: item.start_time_s)
+        return f"Weather {condition.value} applied to {block_id} at {start_time_s:.0f}s"
+
+    def inject_speed_restriction(
+        self,
+        kind: str,
+        block_id: str,
+        start_position_m: float,
+        end_position_m: float,
+        speed_limit_kmh: float,
+        duration_s: float | None,
+    ) -> str:
+        block = self._block(block_id)
+        if block is None:
+            raise ValueError(f"Unknown block_id: {block_id}")
+        if start_position_m < 0 or end_position_m > block.length_m:
+            raise ValueError(f"Restriction range must stay within {block_id} (0-{block.length_m:g}m)")
+
+        start_time_s = self.engine.sim_time_s
+        end_time_s = start_time_s + duration_s if duration_s is not None else None
+        suffix = uuid4().hex[:8].upper()
+
+        if kind == "tsr":
+            restriction = TemporarySpeedRestriction(
+                restriction_id=f"TSR-MANUAL-{suffix}",
+                block_id=block_id,
+                start_position_m=start_position_m,
+                end_position_m=end_position_m,
+                speed_limit_kmh=speed_limit_kmh,
+                start_time_s=start_time_s,
+                end_time_s=end_time_s,
+            )
+            self.config.environment.temporary_speed_restrictions.append(restriction)
+            label = "TSR"
+        elif kind == "maintenance":
+            restriction = MaintenanceRestriction(
+                restriction_id=f"MAINT-MANUAL-{suffix}",
+                block_id=block_id,
+                start_position_m=start_position_m,
+                end_position_m=end_position_m,
+                speed_limit_kmh=speed_limit_kmh,
+                start_time_s=start_time_s,
+                end_time_s=end_time_s,
+            )
+            self.config.environment.maintenance_restrictions.append(restriction)
+            label = "Maintenance speed limit"
+        else:
+            raise ValueError(f"Unknown restriction kind: {kind}")
+
+        duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
+        return (
+            f"{label} {restriction.restriction_id} applied to {block_id} "
+            f"{start_position_m:g}-{end_position_m:g}m at {speed_limit_kmh:g} km/h {duration_text}"
+        )
 
     def tick(self) -> list[TelemetryFrame]:
         with self.lock:
@@ -109,6 +197,7 @@ class SimulationSession:
 
     def reset(self) -> list[TelemetryFrame]:
         with self.lock:
+            self.config = self.baseline_config.model_copy(deep=True)
             self.engine = _new_engine(self.config, self.scenario_id)
             self.playing = False
             self.playback_speed = 1.0
