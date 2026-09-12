@@ -1,17 +1,20 @@
+import { useRef, useState } from 'react'
 import type { CrossingState, SignalAspect, SimulatorConfigViz, TelemetryFrame, TrackBlockViz } from '../types'
 
 interface Point { x: number; y: number }
 interface Pose extends Point { angleDeg: number }
 
-const WIDTH = 3600
+const WIDTH = 6000
 const HEIGHT = 430
-const LEFT = 100
-const RIGHT = WIDTH - 100
+const LEFT = 120
+const RIGHT = WIDTH - 120
 const BASE_Y = 220
 const TRACK_SPACING = 24
-const PATH_SAMPLES = 520
-const COACH_WIDTH_PX = 38
-const COACH_GAP_PX = 5
+const PATH_SAMPLES = 760
+const COACH_GAP_PX = 4
+const MIN_ZOOM = 0.2
+const MAX_ZOOM = 1.25
+const ZOOM_STEP = 0.1
 
 function activeAt<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
   let active: T | undefined
@@ -39,6 +42,10 @@ function geometry(config: SimulatorConfigViz) {
     y = y1
     return { block, x0, x1, y0, y1 }
   })
+}
+
+function metersToPixels(config: SimulatorConfigViz, meters: number): number {
+  return (meters / Math.max(1, config.route.total_length_m)) * (RIGHT - LEFT)
 }
 
 function trainCompartmentCount(lengthM: number): number {
@@ -85,7 +92,17 @@ function centerPoseAt(config: SimulatorConfigViz, routePositionM: number): Pose 
     point = { x: item.x0 + (item.x1 - item.x0) * t, y: item.y0 + (item.y1 - item.y0) * t }
     tangent = { x: item.x1 - item.x0, y: item.y1 - item.y0 }
   }
-  return { ...point, angleDeg: Math.atan2(tangent.y, tangent.x) * 180 / Math.PI }
+
+  const angleDeg = Math.atan2(tangent.y, tangent.x) * 180 / Math.PI
+  if (routePositionM === clamped) return { ...point, angleDeg }
+
+  const extensionPx = metersToPixels(config, routePositionM - clamped)
+  const angle = angleDeg * Math.PI / 180
+  return {
+    x: point.x + Math.cos(angle) * extensionPx,
+    y: point.y + Math.sin(angle) * extensionPx,
+    angleDeg,
+  }
 }
 
 function poseAt(config: SimulatorConfigViz, routePositionM: number, trackIdx: number): Pose {
@@ -127,23 +144,41 @@ function signalFallback(config: SimulatorConfigViz, signalId: string, simTime: n
 }
 
 function stationLabelOffset(stationId: string): { x: number; y: number } {
-  if (stationId === 'MATHURA') return { x: -32, y: -54 }
-  return { x: 0, y: -49 }
+  if (stationId === 'MATHURA') return { x: -42, y: -66 }
+  return { x: 0, y: -62 }
 }
 
-function displayPose(config: SimulatorConfigViz, frame: TelemetryFrame): Pose {
+function displayPoseAt(config: SimulatorConfigViz, frame: TelemetryFrame, routePositionM: number): Pose {
   const run = config.trains.find((item) => item.train.train_id === frame.train_id)
   const plan = run?.track_changes[0]
   const crossover = plan ? config.crossovers.find((item) => item.crossover_id === plan.crossover_id) : undefined
   const hasCompletedTurnaround = Boolean(plan?.reverse_after_change && frame.direction === 'REVERSE' && frame.track_id === crossover?.to_track_id)
 
-  if (crossover && !hasCompletedTurnaround && frame.route_position_m >= crossover.route_start_m && frame.route_position_m <= crossover.route_end_m) {
-    const t = (frame.route_position_m - crossover.route_start_m) / Math.max(1, crossover.route_end_m - crossover.route_start_m)
-    const from = poseAt(config, frame.route_position_m, trackIndex(config, crossover.from_track_id))
-    const to = poseAt(config, frame.route_position_m, trackIndex(config, crossover.to_track_id))
-    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, angleDeg: from.angleDeg }
+  if (crossover && !hasCompletedTurnaround) {
+    if (routePositionM >= crossover.route_start_m && routePositionM <= crossover.route_end_m) {
+      const t = (routePositionM - crossover.route_start_m) / Math.max(1, crossover.route_end_m - crossover.route_start_m)
+      const from = poseAt(config, routePositionM, trackIndex(config, crossover.from_track_id))
+      const to = poseAt(config, routePositionM, trackIndex(config, crossover.to_track_id))
+      return {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        angleDeg: from.angleDeg,
+      }
+    }
+
+    if (frame.track_id === crossover.to_track_id && routePositionM < crossover.route_start_m) {
+      return poseAt(config, routePositionM, trackIndex(config, crossover.from_track_id))
+    }
+    if (frame.track_id === crossover.from_track_id && routePositionM > crossover.route_end_m) {
+      return poseAt(config, routePositionM, trackIndex(config, crossover.to_track_id))
+    }
   }
-  return poseAt(config, frame.route_position_m, trackIndex(config, frame.track_id))
+
+  return poseAt(config, routePositionM, trackIndex(config, frame.track_id))
+}
+
+function clampZoom(value: number): number {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value))
 }
 
 export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain }: {
@@ -156,16 +191,42 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 }) {
   const simTime = frames[0]?.sim_time_s ?? 0
   const blocks = geometry(config)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(0.55)
+
+  const fitRoute = () => {
+    const viewportWidth = scrollRef.current?.clientWidth ?? WIDTH
+    const nextZoom = clampZoom((viewportWidth - 28) / WIDTH)
+    setZoom(nextZoom)
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0
+  }
+
+  const resetZoom = () => setZoom(1)
+  const platformLengthPx = Math.max(120, metersToPixels(config, 390))
 
   return (
     <section className="panel route-panel realistic-route-panel">
-      <div className="panel-heading">
+      <div className="panel-heading route-panel-heading">
         <div><span className="eyebrow">Live railway network</span><h2>{config.route.route_name}</h2></div>
-        <div className="route-meta">{config.route.track_ids.length} tracks · {frames.length} trains · {config.stations.length} stations</div>
+        <div className="route-heading-tools">
+          <div className="route-meta">{config.route.track_ids.length} tracks · {frames.length} trains · {config.stations.length} stations</div>
+          <div className="route-zoom-controls" aria-label="Route zoom controls">
+            <button type="button" onClick={() => setZoom((value) => clampZoom(value - ZOOM_STEP))} aria-label="Zoom out">−</button>
+            <button type="button" onClick={fitRoute}>Fit</button>
+            <button type="button" onClick={() => setZoom((value) => clampZoom(value + ZOOM_STEP))} aria-label="Zoom in">+</button>
+            <button type="button" className="zoom-value" onClick={resetZoom} title="Reset to 100%">{Math.round(zoom * 100)}%</button>
+          </div>
+        </div>
       </div>
 
-      <div className="realistic-route-scroll">
-        <svg className="realistic-route" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Multi-train curved railway network">
+      <div className="realistic-route-scroll" ref={scrollRef}>
+        <svg
+          className="realistic-route"
+          style={{ width: `${WIDTH * zoom}px` }}
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          role="img"
+          aria-label="Multi-train curved railway network"
+        >
           {blocks.slice(1).map(({ block }) => {
             const p = pointAt(config, block.route_start_m, 0)
             return <line key={block.block_id} x1={p.x} y1={50} x2={p.x} y2={HEIGHT - 48} className="block-boundary" />
@@ -177,7 +238,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
               <path d={fullTrackPath(config, index)} className="track-bed-path" />
               <path d={fullTrackPath(config, index)} className="track-sleeper-path" />
               <path d={fullTrackPath(config, index)} className="track-rail-path" />
-              <text x={18} y={pointAt(config, 0, index).y + 4} className="track-name">{id}</text>
+              <text x={24} y={pointAt(config, 0, index).y + 4} className="track-name">{id}</text>
             </g>
           ))}
 
@@ -198,7 +259,10 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
                 const idx = trackIndex(config, platform.track_id)
                 const p = poseAt(config, platform.route_position_m, idx)
                 const side = idx === 0 ? -1 : 1
-                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x="-23" y={side < 0 ? -34 : 22} width="46" height="12" rx="3" /></g>
+                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}>
+                  <rect x={-platformLengthPx / 2} y={side < 0 ? -38 : 24} width={platformLengthPx} height="14" rx="4" />
+                  <line x1={-platformLengthPx / 2 + 8} y1={side < 0 ? -31 : 31} x2={platformLengthPx / 2 - 8} y2={side < 0 ? -31 : 31} className="platform-edge" />
+                </g>
               })}
               {(() => {
                 const p = poseAt(config, station.platforms[0].route_position_m, 0)
@@ -238,35 +302,39 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
           })}
 
           {frames.map((frame, index) => {
-            const pose = displayPose(config, frame)
             const reverse = frame.direction === 'REVERSE'
+            const directionSign = reverse ? -1 : 1
             const selected = frame.train_id === selectedTrainId
             const run = config.trains.find((item) => item.train.train_id === frame.train_id)
             const trainLengthM = run?.train.length_m ?? config.train.length_m
             const compartmentCount = trainCompartmentCount(trainLengthM)
-            const visualTrainLengthPx = compartmentCount * COACH_WIDTH_PX + (compartmentCount - 1) * COACH_GAP_PX
+            const compartmentLengthM = trainLengthM / compartmentCount
+            const coachWidthPx = Math.max(26, metersToPixels(config, compartmentLengthM) - COACH_GAP_PX)
+            const frontPose = displayPoseAt(config, frame, frame.route_position_m)
 
-            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
-              <g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body">
-                {Array.from({ length: compartmentCount }, (_, compartmentIndex) => {
-                  const x = -visualTrainLengthPx + compartmentIndex * (COACH_WIDTH_PX + COACH_GAP_PX)
-                  const isFront = compartmentIndex === compartmentCount - 1
-                  const isRear = compartmentIndex === 0
-                  return <g key={compartmentIndex} className={`train-compartment ${isFront ? 'front-coach' : ''} ${isRear ? 'rear-coach' : ''}`}>
-                    {!isRear && <rect x={x - COACH_GAP_PX} y="-2" width={COACH_GAP_PX} height="6" rx="2" className="train-gangway" />}
-                    <rect x={x} y="-12" width={COACH_WIDTH_PX} height="20" rx="5" className="train-coach-shell" />
-                    <line x1={x + 4} y1="-10" x2={x + COACH_WIDTH_PX - 4} y2="-10" className="train-roof-line" />
-                    <rect x={x + 5} y="-8" width="7" height="6" rx="1.5" className="train-window" />
-                    <rect x={x + 15.5} y="-8" width="7" height="6" rx="1.5" className="train-window" />
-                    <rect x={x + 26} y="-8" width="7" height="6" rx="1.5" className="train-window" />
-                    {!isFront && <rect x={x + COACH_WIDTH_PX - 6.5} y="0" width="3.5" height="6" rx="1" className="train-door" />}
-                    {isFront && <path d={`M ${x + COACH_WIDTH_PX - 8} -12 L ${x + COACH_WIDTH_PX} -6 L ${x + COACH_WIDTH_PX} 5 L ${x + COACH_WIDTH_PX - 8} 8 Z`} className="train-cab" />}
-                    <circle cx={x + 8} cy="10" r="3" />
-                    <circle cx={x + COACH_WIDTH_PX - 8} cy="10" r="3" />
-                  </g>
-                })}
-              </g>
-              <text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text>
+            return <g key={frame.train_id} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
+              {Array.from({ length: compartmentCount }, (_, compartmentIndex) => {
+                const distanceBehindFrontM = (compartmentIndex + 0.5) * compartmentLengthM
+                const coachRoutePositionM = frame.route_position_m - directionSign * distanceBehindFrontM
+                const coachPose = displayPoseAt(config, frame, coachRoutePositionM)
+                const isFront = compartmentIndex === 0
+                const isRear = compartmentIndex === compartmentCount - 1
+                const x = -coachWidthPx / 2
+
+                return <g key={compartmentIndex} transform={`translate(${coachPose.x} ${coachPose.y}) rotate(${coachPose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className={`svg-train-body train-compartment ${isFront ? 'front-coach' : ''} ${isRear ? 'rear-coach' : ''}`}>
+                  <rect x={x} y="-12" width={coachWidthPx} height="20" rx="5" className="train-coach-shell" />
+                  <line x1={x + 4} y1="-10" x2={x + coachWidthPx - 4} y2="-10" className="train-roof-line" />
+                  <rect x={x + coachWidthPx * .18} y="-8" width={Math.max(5, coachWidthPx * .16)} height="6" rx="1.5" className="train-window" />
+                  <rect x={x + coachWidthPx * .42} y="-8" width={Math.max(5, coachWidthPx * .16)} height="6" rx="1.5" className="train-window" />
+                  <rect x={x + coachWidthPx * .66} y="-8" width={Math.max(5, coachWidthPx * .16)} height="6" rx="1.5" className="train-window" />
+                  {!isFront && <rect x={x + coachWidthPx - 7} y="0" width="4" height="6" rx="1" className="train-door" />}
+                  {isFront && <path d={`M ${coachWidthPx / 2 - 9} -12 L ${coachWidthPx / 2} -6 L ${coachWidthPx / 2} 5 L ${coachWidthPx / 2 - 9} 8 Z`} className="train-cab" />}
+                  {!isRear && <line x1={x - COACH_GAP_PX / 2} y1="0" x2={x} y2="0" className="train-coupler" />}
+                  <circle cx={x + Math.min(9, coachWidthPx * .24)} cy="10" r="3" />
+                  <circle cx={x + coachWidthPx - Math.min(9, coachWidthPx * .24)} cy="10" r="3" />
+                </g>
+              })}
+              <text x={frontPose.x} y={frontPose.y - 28} textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text>
             </g>
           })}
 
