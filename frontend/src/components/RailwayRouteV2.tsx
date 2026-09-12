@@ -3,13 +3,15 @@ import type { CrossingState, SignalAspect, SimulatorConfigViz, TelemetryFrame, T
 interface Point { x: number; y: number }
 interface Pose extends Point { angleDeg: number }
 
-const WIDTH = 1400
+const WIDTH = 3600
 const HEIGHT = 430
-const LEFT = 80
-const RIGHT = WIDTH - 80
+const LEFT = 100
+const RIGHT = WIDTH - 100
 const BASE_Y = 220
 const TRACK_SPACING = 24
-const PATH_SAMPLES = 260
+const PATH_SAMPLES = 520
+const COACH_WIDTH_PX = 38
+const COACH_GAP_PX = 5
 
 function activeAt<T extends { start_time_s: number }>(timeline: T[], simTime: number): T | undefined {
   let active: T | undefined
@@ -37,14 +39,6 @@ function geometry(config: SimulatorConfigViz) {
     y = y1
     return { block, x0, x1, y0, y1 }
   })
-}
-
-function metersToPixels(config: SimulatorConfigViz, meters: number): number {
-  return (meters / Math.max(1, config.route.total_length_m)) * (RIGHT - LEFT)
-}
-
-function visualLength(config: SimulatorConfigViz, meters: number, minPx: number, maxPx: number): number {
-  return Math.max(minPx, Math.min(maxPx, metersToPixels(config, meters)))
 }
 
 function trainCompartmentCount(lengthM: number): number {
@@ -249,26 +243,26 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             const selected = frame.train_id === selectedTrainId
             const run = config.trains.find((item) => item.train.train_id === frame.train_id)
             const trainLengthM = run?.train.length_m ?? config.train.length_m
-            const trainLengthPx = visualLength(config, trainLengthM, 16, 38)
             const compartmentCount = trainCompartmentCount(trainLengthM)
-            const compartmentGapPx = compartmentCount > 1 ? 1.5 : 0
-            const compartmentWidthPx = (trainLengthPx - compartmentGapPx * (compartmentCount - 1)) / compartmentCount
-            const nosePx = Math.min(5, compartmentWidthPx * 0.35)
-            const wheelInsetPx = Math.max(2.5, compartmentWidthPx * 0.22)
+            const visualTrainLengthPx = compartmentCount * COACH_WIDTH_PX + (compartmentCount - 1) * COACH_GAP_PX
 
             return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
               <g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body">
                 {Array.from({ length: compartmentCount }, (_, compartmentIndex) => {
-                  const x = -trainLengthPx + compartmentIndex * (compartmentWidthPx + compartmentGapPx)
+                  const x = -visualTrainLengthPx + compartmentIndex * (COACH_WIDTH_PX + COACH_GAP_PX)
                   const isFront = compartmentIndex === compartmentCount - 1
                   const isRear = compartmentIndex === 0
-                  return <g key={compartmentIndex} className="train-compartment">
-                    <rect x={x} y="-12" width={compartmentWidthPx} height="20" rx={isFront || isRear ? 4 : 2} />
-                    {isFront && <path d={`M ${Math.max(x, -nosePx)} -12 L 0 -6 L 0 5 L ${Math.max(x, -nosePx)} 8 Z`} />}
-                    <rect x={x + compartmentWidthPx * 0.22} y="-8" width={Math.max(2.5, compartmentWidthPx * 0.2)} height="6" rx="1" className="train-window" />
-                    <rect x={x + compartmentWidthPx * 0.55} y="-8" width={Math.max(2.5, compartmentWidthPx * 0.2)} height="6" rx="1" className="train-window" />
-                    <circle cx={x + wheelInsetPx} cy="10" r="2.5" />
-                    <circle cx={x + compartmentWidthPx - wheelInsetPx} cy="10" r="2.5" />
+                  return <g key={compartmentIndex} className={`train-compartment ${isFront ? 'front-coach' : ''} ${isRear ? 'rear-coach' : ''}`}>
+                    {!isRear && <rect x={x - COACH_GAP_PX} y="-2" width={COACH_GAP_PX} height="6" rx="2" className="train-gangway" />}
+                    <rect x={x} y="-12" width={COACH_WIDTH_PX} height="20" rx="5" className="train-coach-shell" />
+                    <line x1={x + 4} y1="-10" x2={x + COACH_WIDTH_PX - 4} y2="-10" className="train-roof-line" />
+                    <rect x={x + 5} y="-8" width="7" height="6" rx="1.5" className="train-window" />
+                    <rect x={x + 15.5} y="-8" width="7" height="6" rx="1.5" className="train-window" />
+                    <rect x={x + 26} y="-8" width="7" height="6" rx="1.5" className="train-window" />
+                    {!isFront && <rect x={x + COACH_WIDTH_PX - 6.5} y="0" width="3.5" height="6" rx="1" className="train-door" />}
+                    {isFront && <path d={`M ${x + COACH_WIDTH_PX - 8} -12 L ${x + COACH_WIDTH_PX} -6 L ${x + COACH_WIDTH_PX} 5 L ${x + COACH_WIDTH_PX - 8} 8 Z`} className="train-cab" />}
+                    <circle cx={x + 8} cy="10" r="3" />
+                    <circle cx={x + COACH_WIDTH_PX - 8} cy="10" r="3" />
                   </g>
                 })}
               </g>
