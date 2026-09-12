@@ -4,6 +4,7 @@ from backend.session import SessionManager
 from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
 from simulator.models import (
     MaintenanceRestriction,
+    SignalAspect,
     TemporarySpeedRestriction,
     WeatherCondition,
     WeatherTimelineEntry,
@@ -75,6 +76,19 @@ def test_manual_tsr_and_maintenance_are_speed_limits_only():
     engine.sim_time_s = 121
     ceiling_after, _, _ = engine._current_ceiling(train)
     assert ceiling_after == 110
+
+
+def test_manual_signal_override_expires_back_to_dynamic_signalling():
+    config = _config()
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="manual-signal")
+    signal = next(item for item in config.signals if item.signal_id == "UP-02")
+    engine.set_manual_signal_override("UP-02", SignalAspect.RED, 20)
+    assert engine.signal_aspect(signal) == SignalAspect.RED
+    engine.sim_time_s = 19
+    assert engine.signal_aspect(signal) == SignalAspect.RED
+    engine.sim_time_s = 20
+    assert "UP-02" not in engine.manual_signal_overrides()
+    assert engine.signal_aspect(signal) == super(NetworkSimulationEngineV4Restrictive, engine).signal_aspect(signal)
 
 
 def test_occupied_platform_adds_station_entry_hold_without_replacing_other_safety_targets():
@@ -159,12 +173,14 @@ def test_session_live_injection_mutates_current_run_and_reset_restores_yaml_base
     session.inject_weather("BLK-02", WeatherCondition.FOG, 900)
     session.inject_speed_restriction("tsr", "BLK-03", 100, 700, 65, 180)
     session.inject_speed_restriction("maintenance", "BLK-04", 200, 900, 40, 240)
+    session.inject_signal("UP-04", SignalAspect.RED, 60)
 
     weather = next(item for item in session.config.environment.weather if item.block_id == "BLK-02")
     assert weather.timeline[-1].start_time_s == 40
     assert weather.timeline[-1].condition == WeatherCondition.FOG
     assert len(session.config.environment.temporary_speed_restrictions) == 1
     assert len(session.config.environment.maintenance_restrictions) == 1
+    assert session.engine.manual_signal_overrides()["UP-04"] == SignalAspect.RED
 
     session.reset()
     weather_after = next(item for item in session.config.environment.weather if item.block_id == "BLK-02")
@@ -172,4 +188,5 @@ def test_session_live_injection_mutates_current_run_and_reset_restores_yaml_base
     assert weather_after.timeline[0].condition == WeatherCondition.CLEAR
     assert session.config.environment.temporary_speed_restrictions == []
     assert session.config.environment.maintenance_restrictions == []
+    assert session.engine.manual_signal_overrides() == {}
     assert session.engine.sim_time_s == 0
