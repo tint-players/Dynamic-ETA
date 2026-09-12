@@ -12,11 +12,13 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
     crossover interlocking remain unchanged. This layer prevents a train from
     accelerating back toward line speed while the governing signal is YELLOW,
     keeps that caution speed after passing a YELLOW while the next signal remains
-    restrictive, and preserves configured station-stop order for turnaround
-    trains so an itinerary can continue naturally onto the return leg.
+    restrictive, preserves configured station-stop order for turnaround trains,
+    and adds a conservative station-entry hold when the required platform is
+    physically occupied by another active train.
     """
 
     YELLOW_APPROACH_SPEED_KMH = 60.0
+    STATION_ENTRY_MARGIN_M = 20.0
 
     def _directional_signals(self, train: RuntimeTrain):
         return [
@@ -54,6 +56,63 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
 
         return None
 
+    def _platform_for_station(self, station_id: str, track_id: str):
+        station = next((item for item in self.config.stations if item.station_id == station_id), None)
+        if station is None:
+            return None
+        return next((platform for platform in station.platforms if platform.track_id == track_id), None)
+
+    def _platform_bounds(self, platform) -> tuple[float, float]:
+        center = self.config.route.block_start_distance_m(platform.block_id) + platform.position_in_block_m
+        half = platform.length_m / 2.0
+        return center - half, center + half
+
+    def _platform_occupant(self, train: RuntimeTrain, station_id: str):
+        platform = self._platform_for_station(station_id, train.current_track_id)
+        if platform is None:
+            return None
+        platform_start, platform_end = self._platform_bounds(platform)
+        for other in self.trains:
+            if other is train or other.completed or self.sim_time_s < other.departure_time_s:
+                continue
+            if train.current_track_id not in self._occupancy_tracks(other):
+                continue
+            body_start, body_end = self._body_bounds(other)
+            if self._intervals_overlap(body_start, body_end, platform_start, platform_end):
+                return other
+        return None
+
+    def _station_occupancy_targets(self, train: RuntimeTrain) -> list[Target]:
+        """Hold before a required platform only when another train occupies it.
+
+        Existing RED-signal, separation and crossover targets remain in the target
+        set and therefore naturally win when they provide an earlier safe stop.
+        This target is a fallback for station layouts without a suitably placed
+        protecting signal.
+        """
+        targets: list[Target] = []
+        for stop in train.station_stops:
+            if stop.station_id in train.served_stations:
+                continue
+            platform = self._platform_for_station(stop.station_id, train.current_track_id)
+            if platform is None:
+                continue
+            occupant = self._platform_occupant(train, stop.station_id)
+            if occupant is None:
+                continue
+
+            platform_start, platform_end = self._platform_bounds(platform)
+            entrance = platform_start if train.sign > 0 else platform_end
+            stop_position = entrance - train.sign * self.STATION_ENTRY_MARGIN_M
+            if self._ahead(train, stop_position) is not None:
+                targets.append(Target(
+                    stop_position,
+                    0.0,
+                    f"STATION_OCCUPIED:{stop.station_id}:{occupant.train.train_id}",
+                    True,
+                ))
+        return targets
+
     def _targets(self, train: RuntimeTrain):
         # Build all non-station targets exactly as V4 already does, then rebuild
         # station targets around the train-body centre. We cannot simply shift the
@@ -65,6 +124,8 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
             for target in super()._targets(train)
             if not target.reason.startswith("STATION:")
         ]
+
+        targets.extend(self._station_occupancy_targets(train))
 
         for stop in train.station_stops:
             if stop.station_id in train.served_stations:
