@@ -213,8 +213,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={Math.max(22, p.y - 76 - labelLift)} textAnchor="middle">{block.block_id}</text>{block.curve_radius_m && <text x={p.x} y={Math.max(37, p.y - 61 - labelLift)} textAnchor="middle" className="curve-label">{block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m</text>}</g>
           })}
 
-          {config.environment.temporary_speed_restrictions.map((item) => <path key={item.restriction_id} d={pathBetween(config, item.route_start_m, item.route_end_m, 0)} className="restriction-line tsr-line" />)}
-          {config.environment.maintenance_restrictions.map((item) => <path key={item.restriction_id} d={pathBetween(config, item.route_start_m, item.route_end_m, 0)} className="restriction-line maintenance-line" />)}
+          {config.environment.temporary_speed_restrictions.map((item) => config.route.track_ids.map((trackId, trackIdx) => <path key={`${item.restriction_id}-${trackId}`} d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line tsr-line" />))}
+          {config.environment.maintenance_restrictions.map((item) => config.route.track_ids.map((trackId, trackIdx) => <path key={`${item.restriction_id}-${trackId}`} d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line maintenance-line" />))}
 
           {config.signals.map((signal) => {
             const idx = trackIndex(config, signal.track_id)
