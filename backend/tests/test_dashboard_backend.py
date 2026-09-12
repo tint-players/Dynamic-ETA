@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 import backend.session as session_module
@@ -340,6 +341,37 @@ def test_completed_dashboard_run_exports_only_after_all_trains_finish(tmp_path, 
         train_rows = [row for row in rows if row["train_id"] == train_id]
         assert min(float(row["actual_remaining_time_s"]) for row in train_rows) == 0.0
         assert all(row["actual_arrival_simulation_s"] for row in train_rows)
+
+    parquet = pd.read_parquet(actual_parquet)
+    assert len(parquet) == len(session.frames)
+    expected_columns = {
+        "trajectory_id",
+        "train_name",
+        "train_max_speed_kmh",
+        "block_length_m",
+        "block_speed_limit_kmh",
+        "train_speed_mps",
+        "speed_gradient_30s",
+        "weather",
+        "tsr_active",
+        "maintenance_active",
+        "station_id",
+        "scheduled_halt_time_s",
+        "scheduled_arrival_time",
+        "expected_arrival_time",
+        "delta_time_s",
+        "actual_remaining_time_s",
+    }
+    assert expected_columns.issubset(parquet.columns)
+    assert set(parquet["train_id"]) == train_ids
+    assert set(parquet["weather"]) == {"CLEAR"}
+    assert not parquet["tsr_active"].any()
+    assert not parquet["maintenance_active"].any()
+    assert parquet["scheduled_arrival_time"].isna().all()
+    assert parquet["expected_arrival_time"].isna().all()
+    assert parquet["delta_time_s"].isna().all()
+    assert (parquet["train_speed_mps"] >= 0).all()
+    assert parquet["speed_gradient_30s"].dropna().between(-1.0, 1.0).all()
 
 
 def test_api_creates_multi_train_session_and_returns_visual_config():
