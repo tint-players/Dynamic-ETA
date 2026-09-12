@@ -127,7 +127,8 @@ function signalFallback(config: SimulatorConfigViz, signalId: string, simTime: n
 }
 
 function stationLabelOffset(stationId: string): { x: number; y: number } {
-  if (stationId === 'MATHURA') return { x: -62, y: -60 }
+  if (stationId === 'MATHURA') return { x: -96, y: -78 }
+  if (stationId === 'FARAH') return { x: -72, y: -54 }
   if (stationId === 'AGRA-CANTT') return { x: 58, y: -60 }
   return { x: 0, y: -49 }
 }
@@ -199,8 +200,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
                 const idx = trackIndex(config, platform.track_id)
                 const p = poseAt(config, platform.route_position_m, idx)
                 const side = idx === 0 ? -1 : 1
-                const platformLengthPx = visualLength(config, platform.length_m, 16, 46)
-                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x={-platformLengthPx / 2} y={side < 0 ? -34 : 22} width={platformLengthPx} height="12" rx="3" /></g>
+                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x="-23" y={side < 0 ? -34 : 22} width="46" height="12" rx="3" /></g>
               })}
               {(() => {
                 const p = poseAt(config, station.platforms[0].route_position_m, 0)
