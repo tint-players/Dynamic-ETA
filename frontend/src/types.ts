@@ -163,6 +163,22 @@ export interface TelemetryFrame {
   total_journey_time_s: number | null
 }
 
+export type ManualInjectionRequest =
+  | {
+      command: 'inject_weather'
+      block_id: string
+      condition: WeatherCondition
+      visibility_m: number
+    }
+  | {
+      command: 'inject_tsr' | 'inject_maintenance'
+      block_id: string
+      start_position_m: number
+      end_position_m: number
+      speed_limit_kmh: number
+      duration_s: number | null
+    }
+
 export interface SessionCreateResponse {
   session_id: string
   scenario_id: string
@@ -175,10 +191,12 @@ export interface SessionCreateResponse {
 }
 
 export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
-export interface ExportPaths { csv: string; parquet: string }
+export interface ExportPaths { csv: string; parquet: string; block_csv?: string; block_parquet?: string }
 
 export type SocketMessage =
   | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState> }
   | ({ type: 'playback_state' } & PlaybackState)
+  | { type: 'config_update'; config: SimulatorConfigViz }
+  | { type: 'injection_applied'; message: string; sim_time_s: number }
   | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }
