@@ -7,13 +7,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from simulator.models import WeatherCondition
+from simulator.models import SignalAspect, WeatherCondition
 
 from .session import SimulationSession, sessions
 from .viz import config_for_visualization
 
 
-app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.3.0")
+app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -37,6 +37,13 @@ class WeatherInjectionCommand(BaseModel):
     block_id: str
     condition: WeatherCondition
     visibility_m: float = Field(gt=0)
+
+
+class SignalInjectionCommand(BaseModel):
+    command: Literal["inject_signal"]
+    signal_id: str
+    aspect: SignalAspect
+    duration_s: float | None = Field(default=60.0, gt=0)
 
 
 class SpeedRestrictionInjectionCommand(BaseModel):
@@ -157,6 +164,13 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
         except Exception as exc:
             await websocket.send_json({"type": "error", "message": f"Invalid weather injection: {exc}"})
             return True
+    elif command_name == "inject_signal":
+        try:
+            command = SignalInjectionCommand.model_validate(payload)
+            message = session.inject_signal(command.signal_id, command.aspect, command.duration_s)
+        except Exception as exc:
+            await websocket.send_json({"type": "error", "message": f"Invalid signal injection: {exc}"})
+            return True
     elif command_name in {"inject_tsr", "inject_maintenance"}:
         try:
             command = SpeedRestrictionInjectionCommand.model_validate(payload)
@@ -181,8 +195,6 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
         "sim_time_s": session.engine.sim_time_s,
     })
     await websocket.send_json(_config_message(session))
-    # Send an immediate snapshot so the dashboard reflects a newly active factor
-    # without waiting for the next simulation tick.
     await websocket.send_json(_telemetry_message(session, session.snapshots()))
     return True
 
