@@ -149,10 +149,10 @@ stations:
 environment:
   weather:
     - {block_id: "BLK-01", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
-    - {block_id: "BLK-02", timeline: [{start_time_s: 0, condition: "RAIN", visibility_m: 4000}]}
-    - {block_id: "BLK-03", timeline: [{start_time_s: 0, condition: "HEAVY_RAIN", visibility_m: 1800}]}
+    - {block_id: "BLK-02", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
+    - {block_id: "BLK-03", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
     - {block_id: "BLK-04", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
-    - {block_id: "BLK-05", timeline: [{start_time_s: 0, condition: "FOG", visibility_m: 700}]}
+    - {block_id: "BLK-05", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
     - {block_id: "BLK-06", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
     - {block_id: "BLK-07", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
     - {block_id: "BLK-08", timeline: [{start_time_s: 0, condition: "CLEAR", visibility_m: 10000}]}
@@ -165,10 +165,8 @@ environment:
     - {signal_id: "UP-06", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
     - {signal_id: "UP-07", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
     - {signal_id: "UP-08", timeline: [{start_time_s: 0, aspect: "GREEN"}]}
-  temporary_speed_restrictions:
-    - {restriction_id: "TSR-001", block_id: "BLK-03", start_position_m: 500, end_position_m: 1200, speed_limit_kmh: 50, start_time_s: 0, end_time_s: null}
-  maintenance_restrictions:
-    - {restriction_id: "MNT-001", block_id: "BLK-06", start_position_m: 400, end_position_m: 900, speed_limit_kmh: 60, start_time_s: 0, end_time_s: null}
+  temporary_speed_restrictions: []
+  maintenance_restrictions: []
   crossings:
     - crossing_id: "XING-001"
       block_id: "BLK-05"
