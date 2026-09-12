@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { CrossingState, SignalAspect, SimulatorConfigViz, TelemetryFrame, TrackBlockViz } from '../types'
+import type { ConstraintState, CrossingState, SignalAspect, SimulatorConfigViz, TelemetryFrame, TrackBlockViz } from '../types'
 
 interface Point { x: number; y: number }
 interface Pose extends Point { angleDeg: number }
@@ -168,7 +168,7 @@ function clampZoom(value: number): number { return Math.max(MIN_ZOOM, Math.min(M
 function snapHalf(value: number): number { return Math.round(value * 2) / 2 }
 function remaining(end: number | null, simTime: number): string { return end == null ? 'until reset' : `${Math.max(0, Math.ceil(end - simTime))}s left` }
 
-export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', rangeDraft = null, onRangeDraft, onRangeDraftChange, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {} }: {
+export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', rangeDraft = null, onRangeDraft, onRangeDraftChange, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {}, constraintState }: {
   config: SimulatorConfigViz
   frames: TelemetryFrame[]
   signalStates: Record<string, SignalAspect>
@@ -183,6 +183,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
   onSignalSelect?: (signalId: string) => void
   selectedSignalId?: string
   manualSignalOverrides?: Record<string, ManualSignalOverrideUi>
+  constraintState?: ConstraintState
 }) {
   const simTime = frames[0]?.sim_time_s ?? 0
   const blocks = geometry(config)
@@ -253,11 +254,13 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
         const labelY = Math.max(24, p.y - 94)
         const weatherSchedule = config.environment.weather.find((item) => item.block_id === block.block_id)
         const weather = activeAt(weatherSchedule?.timeline ?? [], simTime)
+        const manualWeather = constraintState?.weather.find((item) => item.block_id === block.block_id)
         const tsrs = activeTsr.filter((item) => item.block_id === block.block_id)
         const maintenance = activeMaintenance.filter((item) => item.block_id === block.block_id)
         const manualSignals = config.signals.filter((signal) => signal.protected_block_id === block.block_id && manualSignalOverrides[signal.signal_id])
-        const lines = [weather && weather.condition !== 'CLEAR' ? `${weather.condition.replaceAll('_', ' ')} · ${weather.visibility_m}m` : null, ...tsrs.map((item) => `TSR ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...maintenance.map((item) => `MAINT ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...manualSignals.map((signal) => `MANUAL ${signal.signal_id} ${manualSignalOverrides[signal.signal_id].aspect} · ${remaining(manualSignalOverrides[signal.signal_id].end_sim_time_s, simTime)}`)].filter(Boolean) as string[]
-        return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={labelY} textAnchor="middle">{block.block_id}</text><text x={p.x} y={labelY + 16} textAnchor="middle" className="curve-label">MAX {block.speed_limit_kmh} km/h</text>{lines.slice(0, 4).map((line, i) => <g key={line}><rect x={p.x - 90} y={p.y + 62 + i * 24} width="180" height="19" rx="7" className="block-constraint-bg" /><text x={p.x} y={p.y + 76 + i * 24} textAnchor="middle" className="block-constraint-text">{line}</text></g>)}</g>
+        const weatherLine = manualWeather ? `${manualWeather.condition.replaceAll('_', ' ')} · ${manualWeather.visibility_m}m · ${remaining(manualWeather.end_time_s, simTime)}` : weather && weather.condition !== 'CLEAR' ? `${weather.condition.replaceAll('_', ' ')} · ${weather.visibility_m}m` : null
+        const lines = [weatherLine, ...tsrs.map((item) => `TSR ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...maintenance.map((item) => `MAINT ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...manualSignals.map((signal) => `MANUAL ${signal.signal_id} ${manualSignalOverrides[signal.signal_id].aspect} · ${remaining(manualSignalOverrides[signal.signal_id].end_sim_time_s, simTime)}`)].filter(Boolean) as string[]
+        return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={labelY} textAnchor="middle">{block.block_id}</text><text x={p.x} y={labelY + 16} textAnchor="middle" className="curve-label">MAX {block.speed_limit_kmh} km/h</text>{lines.slice(0, 4).map((line, i) => <g key={line}><rect x={p.x - 105} y={p.y + 62 + i * 24} width="210" height="19" rx="7" className="block-constraint-bg" /><text x={p.x} y={p.y + 76 + i * 24} textAnchor="middle" className="block-constraint-text">{line}</text></g>)}</g>
       })}
 
       {activeTsr.map((item) => config.route.track_ids.map((trackId, trackIdx) => <g key={`${item.restriction_id}-${trackId}`}><path d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line tsr-line" /><text x={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).x} y={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).y - 18} textAnchor="middle" className="restriction-track-label">TSR · {item.speed_limit_kmh} km/h · {remaining(item.end_time_s, simTime)}</text></g>))}
