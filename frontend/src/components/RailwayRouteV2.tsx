@@ -128,7 +128,6 @@ function signalFallback(config: SimulatorConfigViz, signalId: string, simTime: n
 
 function stationLabelOffset(stationId: string): { x: number; y: number } {
   if (stationId === 'MATHURA') return { x: -32, y: -54 }
-  if (stationId === 'AGRA-CANTT') return { x: 58, y: -60 }
   return { x: 0, y: -49 }
 }
 
@@ -210,7 +209,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
           {blocks.map(({ block }) => {
             const p = pointAt(config, block.route_start_m + block.length_m / 2, 0)
-            return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={Math.max(22, p.y - 76)} textAnchor="middle">{block.block_id}</text>{block.curve_radius_m && <text x={p.x} y={Math.max(37, p.y - 61)} textAnchor="middle" className="curve-label">{block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m</text>}</g>
+            const labelLift = block.block_id === 'BLK-03' ? 18 : 0
+            return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={Math.max(22, p.y - 76 - labelLift)} textAnchor="middle">{block.block_id}</text>{block.curve_radius_m && <text x={p.x} y={Math.max(37, p.y - 61 - labelLift)} textAnchor="middle" className="curve-label">{block.curve_direction === 'LEFT' ? '↶' : '↷'} R{block.curve_radius_m}m</text>}</g>
           })}
 
           {config.environment.temporary_speed_restrictions.map((item) => <path key={item.restriction_id} d={pathBetween(config, item.route_start_m, item.route_end_m, 0)} className="restriction-line tsr-line" />)}
