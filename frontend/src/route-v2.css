@@ -34,7 +34,8 @@
 .svg-station rect { fill: #64748b; stroke: #cbd5e1; stroke-width: 1; }
 .svg-station text { fill: #f1f5f9; font-size: 10px; font-weight: 800; paint-order: stroke; stroke: #07111b; stroke-width: 3px; }
 .svg-train-position { transition: transform .18s linear; cursor: pointer; }
-.svg-train-position.waiting, .svg-train-position.completed { display: none; }
+.svg-train-position.waiting { opacity: .68; }
+.svg-train-position.completed { opacity: .78; }
 .svg-train-position.selected .svg-train-body { filter: drop-shadow(0 0 9px #f8fafc); }
 .svg-train-position.selected .train-speed-label { fill: #fff; font-size: 10px; }
 .svg-train-body { transform-box: fill-box; transform-origin: center; }
