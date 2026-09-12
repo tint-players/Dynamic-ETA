@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend.session import SessionManager
 from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
 from simulator.models import (
@@ -74,6 +76,23 @@ def test_manual_signal_override_expires_back_to_dynamic_signalling():
     engine.sim_time_s = 20
     assert "UP-02" not in engine.manual_signal_overrides()
     assert engine.signal_aspect(signal) == super(NetworkSimulationEngineV4Restrictive, engine).signal_aspect(signal)
+
+
+def test_manual_signal_injection_rejects_green_and_reset_returns_selected_signal_to_automatic():
+    session = SessionManager().create("delhi_agra_corridor.yaml")
+    with pytest.raises(ValueError, match="only supports RED or YELLOW"):
+        session.inject_signal("UP-04", SignalAspect.GREEN, 60)
+
+    session.inject_signal("UP-04", SignalAspect.YELLOW, 120)
+    session.inject_signal("UP-05", SignalAspect.RED, 120)
+    assert session.engine.manual_signal_overrides()["UP-04"] == SignalAspect.YELLOW
+    assert session.engine.manual_signal_overrides()["UP-05"] == SignalAspect.RED
+
+    session.reset_signal("UP-04")
+    overrides = session.engine.manual_signal_overrides()
+    assert "UP-04" not in overrides
+    assert overrides["UP-05"] == SignalAspect.RED
+    assert all(item["signal_id"] != "UP-04" for item in session.active_constraints()["signals"])
 
 
 def test_occupied_platform_adds_station_entry_hold_without_replacing_other_safety_targets():
