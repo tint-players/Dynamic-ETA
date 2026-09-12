@@ -55,21 +55,32 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         return None
 
     def _targets(self, train: RuntimeTrain):
-        targets = super()._targets(train)
+        # Build all non-station targets exactly as V4 already does, then rebuild
+        # station targets around the train-body centre. We cannot simply shift the
+        # station targets returned by super()._targets(): once the train front has
+        # passed the platform centre, V4 would stop returning that original target
+        # even though the shifted front target is still ahead.
+        targets = [
+            target
+            for target in super()._targets(train)
+            if not target.reason.startswith("STATION:")
+        ]
 
-        centered_targets = []
-        for target in targets:
-            if target.station_id is not None and target.reason.startswith("STATION:"):
-                centered_targets.append(Target(
-                    target.position_m + train.sign * (train.train.length_m / 2.0),
-                    target.speed_kmh,
-                    target.reason,
-                    target.hard_stop,
-                    target.station_id,
+        for stop in train.station_stops:
+            if stop.station_id in train.served_stations:
+                continue
+            platform_center = self._platform_position(stop.station_id, train.current_track_id)
+            if platform_center is None:
+                continue
+            stop_position = platform_center + train.sign * (train.train.length_m / 2.0)
+            if self._ahead(train, stop_position) is not None:
+                targets.append(Target(
+                    stop_position,
+                    0.0,
+                    f"STATION:{stop.station_id}",
+                    True,
+                    stop.station_id,
                 ))
-            else:
-                centered_targets.append(target)
-        targets = centered_targets
 
         if not any(plan.reverse_after_change for plan in train.track_changes):
             return targets
