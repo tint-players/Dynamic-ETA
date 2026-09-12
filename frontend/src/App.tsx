@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { connectSimulation, createSession, sendCommand } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
-import type { ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
+import type { CrossingState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
 
 const initialPlayback: PlaybackState = { playing: false, playback_speed: 1, complete: false }
 
@@ -25,6 +25,7 @@ export default function App() {
   const [selectedTrainId, setSelectedTrainId] = useState<string>('')
   const [events, setEvents] = useState<DebugEvent[]>([])
   const [signalStates, setSignalStates] = useState<Record<string, SignalAspect>>({})
+  const [crossingStates, setCrossingStates] = useState<Record<string, CrossingState>>({})
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
   const [exportPaths, setExportPaths] = useState<ExportPaths | null>(null)
   const [connection, setConnection] = useState('connecting')
@@ -41,6 +42,7 @@ export default function App() {
         setSession(created)
         setFrames(created.initial_frames)
         setSignalStates(created.signal_states)
+        setCrossingStates(created.crossing_states)
         const initialSelected = created.config.train.train_id
         setSelectedTrainId(initialSelected)
         setHistoryByTrain(Object.fromEntries(created.initial_frames.map((f) => [f.train_id, [f]])))
@@ -55,6 +57,7 @@ export default function App() {
               const isReset = nextFrames.every((f) => f.tick === 0 && f.sim_time_s === 0) && Object.values(previousFramesRef.current).some((f) => f.tick > 0)
               setFrames(nextFrames)
               setSignalStates(message.signal_states)
+              setCrossingStates(message.crossing_states)
               if (isReset) {
                 setHistoryByTrain(Object.fromEntries(nextFrames.map((f) => [f.train_id, [f]])))
                 setEvents([{ id: 'reset-0', time: 0, text: 'Multi-train simulation reset' }])
@@ -108,6 +111,7 @@ export default function App() {
         selectedTrainId={selectedFrame.train_id}
         onSelectTrain={setSelectedTrainId}
         signalStates={signalStates}
+        crossingStates={crossingStates}
         history={selectedHistory}
         events={events}
         playback={playback}

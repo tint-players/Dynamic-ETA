@@ -12,6 +12,7 @@ from simulator.engine import SimulationEngine
 from simulator.exporters import BatchExporter
 from simulator.models import SimulationConfig, TelemetryFrame
 from simulator.network_engine_v4 import NetworkSimulationEngineV4
+from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
@@ -28,7 +29,7 @@ def _display_path(path: Path) -> str:
 
 def _new_engine(config: SimulationConfig, scenario_id: str):
     if config.additional_train_runs or config.stations or config.dynamic_signalling:
-        return NetworkSimulationEngineV4(config, scenario_id=scenario_id)
+        return NetworkSimulationEngineV4Restrictive(config, scenario_id=scenario_id)
     return SimulationEngine(config, scenario_id=scenario_id)
 
 
@@ -64,6 +65,11 @@ class SimulationSession:
     def signal_states(self) -> dict[str, str]:
         if self.is_multi_train:
             return {key: value.value for key, value in self.engine.signal_states().items()}
+        return {}
+
+    def crossing_states(self) -> dict[str, str]:
+        if self.is_multi_train:
+            return {key: value.value for key, value in self.engine.crossing_states().items()}
         return {}
 
     def tick(self) -> list[TelemetryFrame]:

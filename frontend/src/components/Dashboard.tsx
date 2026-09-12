@@ -1,4 +1,4 @@
-import type { ExportPaths, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
+import type { CrossingState, ExportPaths, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame } from '../types'
 import RailwayRouteV2 from './RailwayRouteV2'
 
 export interface DebugEvent { id: string; time: number; text: string }
@@ -10,6 +10,7 @@ interface DashboardProps {
   selectedTrainId: string
   onSelectTrain: (trainId: string) => void
   signalStates: Record<string, SignalAspect>
+  crossingStates: Record<string, CrossingState>
   history: TelemetryFrame[]
   events: DebugEvent[]
   playback: PlaybackState
@@ -78,6 +79,6 @@ function EventLog({ events }: { events: DebugEvent[] }) {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { config, frame, frames, selectedTrainId, onSelectTrain, signalStates, history, events, playback, exportPaths } = props
-  return <main className="dashboard"><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></header><SimulationControls {...props} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} />{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
+  const { config, frame, frames, selectedTrainId, onSelectTrain, signalStates, crossingStates, history, events, playback, exportPaths } = props
+  return <main className="dashboard"><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></header><SimulationControls {...props} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} />{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
 }
