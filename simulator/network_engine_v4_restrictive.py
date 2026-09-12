@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .models import SignalAspect, WeatherCondition
-from .network_engine import RuntimeTrain
+from .network_engine import RuntimeTrain, Target
 from .network_engine_v4 import NetworkSimulationEngineV4
 
 
@@ -56,6 +56,21 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
 
     def _targets(self, train: RuntimeTrain):
         targets = super()._targets(train)
+
+        centered_targets = []
+        for target in targets:
+            if target.station_id is not None and target.reason.startswith("STATION:"):
+                centered_targets.append(Target(
+                    target.position_m + train.sign * (train.train.length_m / 2.0),
+                    target.speed_kmh,
+                    target.reason,
+                    target.hard_stop,
+                    target.station_id,
+                ))
+            else:
+                centered_targets.append(target)
+        targets = centered_targets
+
         if not any(plan.reverse_after_change for plan in train.track_changes):
             return targets
 
