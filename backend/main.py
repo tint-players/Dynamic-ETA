@@ -7,11 +7,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from simulator.models import WeatherCondition
+
 from .session import SimulationSession, sessions
 from .viz import config_for_visualization
 
 
-app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.2.0")
+app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -28,6 +30,22 @@ class CreateSessionRequest(BaseModel):
 class PlaybackCommand(BaseModel):
     command: Literal["play", "pause", "reset", "step", "set_speed"]
     speed: float | None = Field(default=None, gt=0)
+
+
+class WeatherInjectionCommand(BaseModel):
+    command: Literal["inject_weather"]
+    block_id: str
+    condition: WeatherCondition
+    visibility_m: float = Field(gt=0)
+
+
+class SpeedRestrictionInjectionCommand(BaseModel):
+    command: Literal["inject_tsr", "inject_maintenance"]
+    block_id: str
+    start_position_m: float = Field(ge=0)
+    end_position_m: float = Field(gt=0)
+    speed_limit_kmh: float = Field(gt=0)
+    duration_s: float | None = Field(default=300.0, gt=0)
 
 
 ALLOWED_PLAYBACK_SPEEDS = {0.5, 1.0, 2.0, 5.0, 10.0}
@@ -53,6 +71,13 @@ def _export_message(session: SimulationSession) -> dict | None:
     if session.export_paths is None:
         return None
     return {"type": "export_complete", "paths": session.export_paths}
+
+
+def _config_message(session: SimulationSession) -> dict:
+    return {
+        "type": "config_update",
+        "config": config_for_visualization(session.config),
+    }
 
 
 @app.get("/api/health")
@@ -104,6 +129,7 @@ def reset_session(session_id: str) -> dict:
         "frames": [frame.model_dump(mode="json") for frame in frames],
         "signal_states": session.signal_states(),
         "crossing_states": session.crossing_states(),
+        "config": config_for_visualization(session.config),
     }
 
 
@@ -122,7 +148,50 @@ async def _send_export_if_ready(websocket: WebSocket, session: SimulationSession
         await websocket.send_json(message)
 
 
+async def _handle_injection(websocket: WebSocket, session: SimulationSession, payload: dict) -> bool:
+    command_name = payload.get("command")
+    if command_name == "inject_weather":
+        try:
+            command = WeatherInjectionCommand.model_validate(payload)
+            message = session.inject_weather(command.block_id, command.condition, command.visibility_m)
+        except Exception as exc:
+            await websocket.send_json({"type": "error", "message": f"Invalid weather injection: {exc}"})
+            return True
+    elif command_name in {"inject_tsr", "inject_maintenance"}:
+        try:
+            command = SpeedRestrictionInjectionCommand.model_validate(payload)
+            kind = "tsr" if command.command == "inject_tsr" else "maintenance"
+            message = session.inject_speed_restriction(
+                kind=kind,
+                block_id=command.block_id,
+                start_position_m=command.start_position_m,
+                end_position_m=command.end_position_m,
+                speed_limit_kmh=command.speed_limit_kmh,
+                duration_s=command.duration_s,
+            )
+        except Exception as exc:
+            await websocket.send_json({"type": "error", "message": f"Invalid restriction injection: {exc}"})
+            return True
+    else:
+        return False
+
+    await websocket.send_json({
+        "type": "injection_applied",
+        "message": message,
+        "sim_time_s": session.engine.sim_time_s,
+    })
+    await websocket.send_json(_config_message(session))
+    # Send an immediate snapshot so the dashboard reflects a newly active factor
+    # without waiting for the next simulation tick.
+    await websocket.send_json(_telemetry_message(session, session.snapshots()))
+    return True
+
+
 async def _handle_command(websocket: WebSocket, session: SimulationSession, payload: dict) -> None:
+    if await _handle_injection(websocket, session, payload):
+        await _send_state(websocket, session)
+        return
+
     try:
         command = PlaybackCommand.model_validate(payload)
     except Exception as exc:
@@ -141,6 +210,7 @@ async def _handle_command(websocket: WebSocket, session: SimulationSession, payl
         session.playback_speed = float(command.speed)
     elif command.command == "reset":
         frames = session.reset()
+        await websocket.send_json(_config_message(session))
         await websocket.send_json(_telemetry_message(session, frames))
     elif command.command == "step":
         session.playing = False
