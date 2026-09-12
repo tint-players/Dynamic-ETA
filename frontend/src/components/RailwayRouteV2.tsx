@@ -47,6 +47,12 @@ function visualLength(config: SimulatorConfigViz, meters: number, minPx: number,
   return Math.max(minPx, Math.min(maxPx, metersToPixels(config, meters)))
 }
 
+function trainCompartmentCount(lengthM: number): number {
+  if (lengthM >= 300) return 3
+  if (lengthM >= 280) return 2
+  return 1
+}
+
 function bezierPoint(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
   const u = 1 - t
   const uu = u * u
@@ -242,11 +248,32 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             const reverse = frame.direction === 'REVERSE'
             const selected = frame.train_id === selectedTrainId
             const run = config.trains.find((item) => item.train.train_id === frame.train_id)
-            const trainLengthPx = visualLength(config, run?.train.length_m ?? config.train.length_m, 16, 38)
-            const nosePx = Math.min(6, trainLengthPx * 0.3)
-            const rearWheelX = -trainLengthPx * 0.75
-            const frontWheelX = -trainLengthPx * 0.2
-            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}><g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body"><rect x={-trainLengthPx} y="-12" width={trainLengthPx} height="20" rx="5" /><path d={`M ${-nosePx} -12 L 0 -6 L 0 5 L ${-nosePx} 8 Z`} /><rect x={-trainLengthPx * 0.7} y="-8" width={Math.max(4, trainLengthPx * 0.2)} height="6" rx="1" className="train-window" /><rect x={-trainLengthPx * 0.4} y="-8" width={Math.max(4, trainLengthPx * 0.2)} height="6" rx="1" className="train-window" /><circle cx={rearWheelX} cy="10" r="3" /><circle cx={frontWheelX} cy="10" r="3" /></g><text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text></g>
+            const trainLengthM = run?.train.length_m ?? config.train.length_m
+            const trainLengthPx = visualLength(config, trainLengthM, 16, 38)
+            const compartmentCount = trainCompartmentCount(trainLengthM)
+            const compartmentGapPx = compartmentCount > 1 ? 1.5 : 0
+            const compartmentWidthPx = (trainLengthPx - compartmentGapPx * (compartmentCount - 1)) / compartmentCount
+            const nosePx = Math.min(5, compartmentWidthPx * 0.35)
+            const wheelInsetPx = Math.max(2.5, compartmentWidthPx * 0.22)
+
+            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}>
+              <g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body">
+                {Array.from({ length: compartmentCount }, (_, compartmentIndex) => {
+                  const x = -trainLengthPx + compartmentIndex * (compartmentWidthPx + compartmentGapPx)
+                  const isFront = compartmentIndex === compartmentCount - 1
+                  const isRear = compartmentIndex === 0
+                  return <g key={compartmentIndex} className="train-compartment">
+                    <rect x={x} y="-12" width={compartmentWidthPx} height="20" rx={isFront || isRear ? 4 : 2} />
+                    {isFront && <path d={`M ${Math.max(x, -nosePx)} -12 L 0 -6 L 0 5 L ${Math.max(x, -nosePx)} 8 Z`} />}
+                    <rect x={x + compartmentWidthPx * 0.22} y="-8" width={Math.max(2.5, compartmentWidthPx * 0.2)} height="6" rx="1" className="train-window" />
+                    <rect x={x + compartmentWidthPx * 0.55} y="-8" width={Math.max(2.5, compartmentWidthPx * 0.2)} height="6" rx="1" className="train-window" />
+                    <circle cx={x + wheelInsetPx} cy="10" r="2.5" />
+                    <circle cx={x + compartmentWidthPx - wheelInsetPx} cy="10" r="2.5" />
+                  </g>
+                })}
+              </g>
+              <text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text>
+            </g>
           })}
 
           <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">DELHI SIDE</text>
