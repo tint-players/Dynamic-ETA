@@ -127,8 +127,7 @@ function signalFallback(config: SimulatorConfigViz, signalId: string, simTime: n
 }
 
 function stationLabelOffset(stationId: string): { x: number; y: number } {
-  if (stationId === 'MATHURA') return { x: -96, y: -78 }
-  if (stationId === 'FARAH') return { x: -72, y: -54 }
+  if (stationId === 'MATHURA') return { x: -32, y: -54 }
   if (stationId === 'AGRA-CANTT') return { x: 58, y: -60 }
   return { x: 0, y: -49 }
 }
@@ -234,7 +233,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             const visualClass = trainMustStop ? 'road-open' : 'road-closed'
             const statusText = trainMustStop ? 'ROAD OPEN' : 'ROAD CLOSED'
             const railText = trainMustStop ? 'TRAIN STOP' : 'RAIL PROTECTED'
-            const labelY = crossingIndex % 2 === 0 ? -68 : 78
+            const labelY = crossing.crossing_id === 'XING-001' ? 78 : (crossingIndex % 2 === 0 ? -68 : 78)
             return <g key={crossing.crossing_id} transform={`translate(${center.x} ${center.y}) rotate(${center.angleDeg})`} className={`svg-crossing ${visualClass}`}><line className="crossing-road-bed" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-road-mark" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-gate" x1="-18" y1="-38" x2="18" y2="-38" /><line className="crossing-gate" x1="-18" y1="38" x2="18" y2="38" /><text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-center.angleDeg} 0 ${labelY})`}><tspan x="0" dy="0">{crossing.crossing_id} · {statusText}</tspan><tspan x="0" dy="13">{railText}</tspan></text></g>
           })}
 
