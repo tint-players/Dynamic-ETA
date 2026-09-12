@@ -36,17 +36,24 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         expires_at = self.sim_time_s + duration_s if duration_s is not None else None
         self._manual_signal_overrides[signal_id] = (aspect, expires_at)
 
-    def manual_signal_overrides(self) -> dict[str, SignalAspect]:
-        active: dict[str, SignalAspect] = {}
-        expired: list[str] = []
-        for signal_id, (aspect, expires_at) in self._manual_signal_overrides.items():
-            if expires_at is not None and self.sim_time_s >= expires_at:
-                expired.append(signal_id)
-            else:
-                active[signal_id] = aspect
+    def manual_signal_override_details(self) -> dict[str, tuple[SignalAspect, float | None]]:
+        expired = [
+            signal_id
+            for signal_id, (_, expires_at) in self._manual_signal_overrides.items()
+            if expires_at is not None and self.sim_time_s >= expires_at
+        ]
         for signal_id in expired:
             self._manual_signal_overrides.pop(signal_id, None)
-        return active
+        return dict(self._manual_signal_overrides)
+
+    def manual_signal_overrides(self) -> dict[str, SignalAspect]:
+        return {
+            signal_id: aspect
+            for signal_id, (aspect, _) in self.manual_signal_override_details().items()
+        }
+
+    def clear_manual_signal_overrides(self) -> None:
+        self._manual_signal_overrides.clear()
 
     def signal_aspect(self, signal, exclude: RuntimeTrain | None = None) -> SignalAspect:
         override = self.manual_signal_overrides().get(signal.signal_id)
@@ -117,13 +124,6 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         return None
 
     def _station_occupancy_targets(self, train: RuntimeTrain) -> list[Target]:
-        """Hold before a required platform only when another train occupies it.
-
-        Existing RED-signal, separation and crossover targets remain in the target
-        set and therefore naturally win when they provide an earlier safe stop.
-        This target is a fallback for station layouts without a suitably placed
-        protecting signal.
-        """
         targets: list[Target] = []
         for stop in train.station_stops:
             if stop.station_id in train.served_stations:
