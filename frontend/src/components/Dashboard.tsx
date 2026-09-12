@@ -1,24 +1,10 @@
 import { useMemo, useState } from 'react'
 
-import type { CrossingState, ExportPaths, ManualInjectionRequest, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame, WeatherCondition } from '../types'
+import type { ConstraintState, CrossingState, ExportPaths, ManualInjectionRequest, PlaybackState, SignalAspect, SimulatorConfigViz, TelemetryFrame, WeatherCondition } from '../types'
 import RailwayRouteV2 from './RailwayRouteV2'
 
 export interface DebugEvent { id: string; time: number; text: string }
-
-export interface RangeDraft {
-  kind: 'tsr' | 'maintenance'
-  block_id: string
-  start_position_m: number
-  end_position_m: number
-}
-
-export interface ManualSignalOverrideUi {
-  signal_id: string
-  aspect: SignalAspect
-  start_sim_time_s: number
-  end_sim_time_s: number
-}
-
+export interface RangeDraft { kind: 'tsr' | 'maintenance'; block_id: string; start_position_m: number; end_position_m: number }
 type ConstraintTool = 'weather' | 'tsr' | 'maintenance' | 'signal'
 
 interface DashboardProps {
@@ -29,6 +15,7 @@ interface DashboardProps {
   onSelectTrain: (trainId: string) => void
   signalStates: Record<string, SignalAspect>
   crossingStates: Record<string, CrossingState>
+  constraintState: ConstraintState
   history: TelemetryFrame[]
   events: DebugEvent[]
   playback: PlaybackState
@@ -37,6 +24,7 @@ interface DashboardProps {
   onPlay: () => void
   onPause: () => void
   onReset: () => void
+  onResetConstraints: () => void
   onStep: () => void
   onSpeed: (speed: number) => void
   onInject: (request: ManualInjectionRequest) => void
@@ -44,10 +32,11 @@ interface DashboardProps {
 
 const fmt = (value: number | null | undefined, digits = 1) => value == null ? '—' : value.toFixed(digits)
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+const WEATHER_VISIBILITY: Record<WeatherCondition, number> = { CLEAR: 10000, RAIN: 5000, HEAVY_RAIN: 2500, FOG: 1000, HEAVY_FOG: 500 }
 
-function SimulationControls({ playback, connection, onPlay, onPause, onReset, onStep, onSpeed }: DashboardProps) {
+function SimulationControls({ playback, connection, onPlay, onPause, onReset, onResetConstraints, onStep, onSpeed }: DashboardProps) {
   const speeds = [0.5, 1, 2, 5, 10]
-  return <section className="controls panel"><div className="transport-buttons"><button onClick={playback.playing ? onPause : onPlay} className="primary">{playback.playing ? 'Pause' : 'Play'}</button><button onClick={onStep} disabled={playback.playing || playback.complete}>Step</button><button onClick={onReset}>Reset baseline</button></div><div className="speed-buttons"><span>Playback</span>{speeds.map((speed) => <button key={speed} className={playback.playback_speed === speed ? 'selected' : ''} onClick={() => onSpeed(speed)}>{speed}×</button>)}</div><div className={`connection ${connection}`}>● {connection}</div></section>
+  return <section className="controls panel"><div className="transport-buttons"><button onClick={playback.playing ? onPause : onPlay} className="primary">{playback.playing ? 'Pause' : 'Play'}</button><button onClick={onStep} disabled={playback.playing || playback.complete}>Step</button><button onClick={onReset}>Reset simulation</button><button onClick={onResetConstraints}>Reset constraints</button></div><div className="speed-buttons"><span>Playback</span>{speeds.map((speed) => <button key={speed} className={playback.playback_speed === speed ? 'selected' : ''} onClick={() => onSpeed(speed)}>{speed}×</button>)}</div><div className={`connection ${connection}`}>● {connection}</div></section>
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -63,7 +52,7 @@ function Stepper({ label, value, min, max, step, suffix, onChange }: { label: st
   return <label className="compact-stepper"><span>{label}</span><div><button type="button" onClick={() => set(value - step)}>−</button><strong>{value}{suffix}</strong><button type="button" onClick={() => set(value + step)}>+</button></div></label>
 }
 
-function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selectedSignalId, onSelectedSignal, rangeDraft, onRangeDraft, onInject, onSignalOverride }: {
+function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selectedSignalId, onSelectedSignal, rangeDraft, onRangeDraft, onInject }: {
   config: SimulatorConfigViz
   simTime: number
   playback: PlaybackState
@@ -74,16 +63,21 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
   rangeDraft: RangeDraft | null
   onRangeDraft: (draft: RangeDraft | null) => void
   onInject: DashboardProps['onInject']
-  onSignalOverride: (item: ManualSignalOverrideUi) => void
 }) {
   const [weatherBlock, setWeatherBlock] = useState(config.route.blocks[0]?.block_id ?? '')
-  const [weatherCondition, setWeatherCondition] = useState<WeatherCondition>('RAIN')
-  const [visibility, setVisibility] = useState(5000)
+  const [weatherCondition, setWeatherCondition] = useState<WeatherCondition>('CLEAR')
+  const [visibility, setVisibility] = useState(WEATHER_VISIBILITY.CLEAR)
+  const [weatherDuration, setWeatherDuration] = useState(300)
   const [restrictionLimit, setRestrictionLimit] = useState(60)
   const [restrictionDuration, setRestrictionDuration] = useState(300)
   const [signalAspect, setSignalAspect] = useState<SignalAspect>('RED')
   const [signalDuration, setSignalDuration] = useState(120)
   const disabled = playback.complete
+
+  const chooseWeather = (condition: WeatherCondition) => {
+    setWeatherCondition(condition)
+    setVisibility(WEATHER_VISIBILITY[condition])
+  }
 
   const applyRestriction = () => {
     if (!rangeDraft) return
@@ -91,21 +85,15 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
     onRangeDraft(null)
   }
 
-  const applySignal = () => {
-    if (!selectedSignalId) return
-    onInject({ command: 'inject_signal', signal_id: selectedSignalId, aspect: signalAspect, duration_s: signalDuration })
-    onSignalOverride({ signal_id: selectedSignalId, aspect: signalAspect, start_sim_time_s: simTime, end_sim_time_s: simTime + signalDuration })
-  }
-
   return <aside className="constraints-drawer panel">
-    <div className="drawer-heading"><div><span className="eyebrow small-eyebrow">Phase 2</span><h2>Constraint controls</h2></div><span>{simTime.toFixed(0)}s</span></div>
+    <div className="drawer-heading"><div><span className="eyebrow small-eyebrow">CONSTRAINT CONTROL</span><h2>Manual intervention</h2></div><span>SIM {Math.floor(simTime / 60).toString().padStart(2, '0')}:{Math.floor(simTime % 60).toString().padStart(2, '0')}</span></div>
     <div className="drawer-tabs">{(['weather', 'tsr', 'maintenance', 'signal'] as ConstraintTool[]).map((tool) => <button key={tool} type="button" className={activeTool === tool ? 'active' : ''} onClick={() => onTool(tool)}>{tool === 'tsr' ? 'TSR' : tool === 'maintenance' ? 'Maintenance' : tool[0].toUpperCase() + tool.slice(1)}</button>)}</div>
 
-    {activeTool === 'weather' && <div className="drawer-section"><div className="drawer-section-title"><strong>Weather</strong><span>applies immediately</span></div><label className="drawer-field">Block<select value={weatherBlock} onChange={(event) => setWeatherBlock(event.target.value)}>{config.route.blocks.map((block) => <option key={block.block_id} value={block.block_id}>{block.block_id}</option>)}</select></label><label className="drawer-field">Condition<select value={weatherCondition} onChange={(event) => setWeatherCondition(event.target.value as WeatherCondition)}><option value="CLEAR">CLEAR</option><option value="RAIN">RAIN</option><option value="HEAVY_RAIN">HEAVY RAIN</option><option value="FOG">FOG</option><option value="HEAVY_FOG">HEAVY FOG</option></select></label><Stepper label="Visibility" value={visibility} min={100} max={20000} step={100} suffix=" m" onChange={setVisibility} /><button className="drawer-apply" disabled={disabled || !weatherBlock} onClick={() => onInject({ command: 'inject_weather', block_id: weatherBlock, condition: weatherCondition, visibility_m: visibility })}>Apply weather</button></div>}
+    {activeTool === 'weather' && <div className="drawer-section"><div className="drawer-section-title"><strong>Weather</strong><span>timed by simulation clock</span></div><label className="drawer-field">Block<select value={weatherBlock} onChange={(event) => setWeatherBlock(event.target.value)}>{config.route.blocks.map((block) => <option key={block.block_id} value={block.block_id}>{block.block_id}</option>)}</select></label><label className="drawer-field">Condition<select value={weatherCondition} onChange={(event) => chooseWeather(event.target.value as WeatherCondition)}><option value="CLEAR">CLEAR</option><option value="RAIN">RAIN</option><option value="HEAVY_RAIN">HEAVY RAIN</option><option value="FOG">FOG</option><option value="HEAVY_FOG">HEAVY FOG</option></select></label><Stepper label="Visibility" value={visibility} min={100} max={20000} step={100} suffix=" m" onChange={setVisibility} /><Stepper label="Duration" value={weatherDuration} min={10} max={3600} step={10} suffix=" s" onChange={setWeatherDuration} /><button className="drawer-apply" disabled={disabled || !weatherBlock} onClick={() => onInject({ command: 'inject_weather', block_id: weatherBlock, condition: weatherCondition, visibility_m: visibility, duration_s: weatherDuration })}>Apply weather</button></div>}
 
-    {(activeTool === 'tsr' || activeTool === 'maintenance') && <div className="drawer-section"><div className="drawer-section-title"><strong>{activeTool === 'tsr' ? 'Temporary speed restriction' : 'Maintenance speed limit'}</strong><span>click track to place</span></div><div className={`range-readout ${rangeDraft?.kind === activeTool ? 'ready' : ''}`}>{rangeDraft?.kind === activeTool ? <><strong>{rangeDraft.block_id}</strong><span>{Math.round(rangeDraft.start_position_m)}m → {Math.round(rangeDraft.end_position_m)}m</span><small>{Math.round(rangeDraft.end_position_m - rangeDraft.start_position_m)}m selected · drag either handle on the network</small></> : <><strong>No range selected</strong><span>Click the live railway track</span><small>A centered 200m section will be created automatically.</small></>}</div><Stepper label="Speed limit" value={restrictionLimit} min={10} max={160} step={5} suffix=" km/h" onChange={setRestrictionLimit} /><Stepper label="Duration" value={restrictionDuration} min={10} max={3600} step={10} suffix=" s" onChange={setRestrictionDuration} /><button className="drawer-apply" disabled={disabled || !rangeDraft || rangeDraft.kind !== activeTool} onClick={applyRestriction}>Apply {activeTool === 'tsr' ? 'TSR' : 'maintenance'}</button></div>}
+    {(activeTool === 'tsr' || activeTool === 'maintenance') && <div className="drawer-section"><div className="drawer-section-title"><strong>{activeTool === 'tsr' ? 'Temporary speed restriction' : 'Maintenance speed limit'}</strong><span>click track to place</span></div><div className={`range-readout ${rangeDraft?.kind === activeTool ? 'ready' : ''}`}>{rangeDraft?.kind === activeTool ? <><strong>{rangeDraft.block_id}</strong><span>{Math.round(rangeDraft.start_position_m)}m → {Math.round(rangeDraft.end_position_m)}m</span><small>{Math.round(rangeDraft.end_position_m - rangeDraft.start_position_m)}m selected · drag either handle on the network</small></> : <><strong>No range selected</strong><span>Click the live railway track</span><small>A centered 200m section will be created automatically.</small></>}</div>{rangeDraft?.kind === activeTool && <button type="button" className="drawer-remove" onClick={() => onRangeDraft(null)}>Remove selection</button>}<Stepper label="Speed limit" value={restrictionLimit} min={10} max={160} step={5} suffix=" km/h" onChange={setRestrictionLimit} /><Stepper label="Duration" value={restrictionDuration} min={10} max={3600} step={10} suffix=" s" onChange={setRestrictionDuration} /><button className="drawer-apply" disabled={disabled || !rangeDraft || rangeDraft.kind !== activeTool} onClick={applyRestriction}>Apply {activeTool === 'tsr' ? 'TSR' : 'maintenance'}</button></div>}
 
-    {activeTool === 'signal' && <div className="drawer-section"><div className="drawer-section-title"><strong>Manual signal</strong><span>click signal to select</span></div><label className="drawer-field">Signal<select value={selectedSignalId} onChange={(event) => onSelectedSignal(event.target.value)}>{config.signals.map((signal) => <option key={signal.signal_id} value={signal.signal_id}>{signal.signal_id} · {signal.protected_block_id}</option>)}</select></label><div className="aspect-selector">{(['GREEN', 'YELLOW', 'RED'] as SignalAspect[]).map((aspect) => <button key={aspect} type="button" className={`${aspect.toLowerCase()} ${signalAspect === aspect ? 'selected' : ''}`} onClick={() => setSignalAspect(aspect)}>{aspect}</button>)}</div><Stepper label="Duration" value={signalDuration} min={10} max={1800} step={10} suffix=" s" onChange={setSignalDuration} /><button className="drawer-apply" disabled={disabled || !selectedSignalId} onClick={applySignal}>Override signal</button></div>}
+    {activeTool === 'signal' && <div className="drawer-section"><div className="drawer-section-title"><strong>Manual signal</strong><span>click signal to select</span></div><label className="drawer-field">Signal<select value={selectedSignalId} onChange={(event) => onSelectedSignal(event.target.value)}>{config.signals.map((signal) => <option key={signal.signal_id} value={signal.signal_id}>{signal.signal_id} · {signal.protected_block_id}</option>)}</select></label><div className="aspect-selector">{(['GREEN', 'YELLOW', 'RED'] as SignalAspect[]).map((aspect) => <button key={aspect} type="button" className={`${aspect.toLowerCase()} ${signalAspect === aspect ? 'selected' : ''}`} onClick={() => setSignalAspect(aspect)}>{aspect}</button>)}</div><Stepper label="Duration" value={signalDuration} min={10} max={1800} step={10} suffix=" s" onChange={setSignalDuration} /><button className="drawer-apply" disabled={disabled || !selectedSignalId} onClick={() => onInject({ command: 'inject_signal', signal_id: selectedSignalId, aspect: signalAspect, duration_s: signalDuration })}>Override signal</button></div>}
 
     <div className="drawer-tip"><strong>Direct manipulation</strong><span>TSR/Maintenance: click the track for a 200m range, then drag either edge. Signal: click the signal, then choose the aspect.</span></div>
   </aside>
@@ -135,23 +123,23 @@ function EventLog({ events }: { events: DebugEvent[] }) {
 }
 
 export default function Dashboard(props: DashboardProps) {
-  const { config, frame, frames, selectedTrainId, onSelectTrain, signalStates, crossingStates, history, events, playback, exportPaths } = props
+  const { config, frame, frames, selectedTrainId, onSelectTrain, signalStates, crossingStates, constraintState, history, events, playback, exportPaths } = props
   const [constraintsOpen, setConstraintsOpen] = useState(false)
-  const [activeTool, setActiveTool] = useState<ConstraintTool>('tsr')
-  const [rangeDraft, setRangeDraft] = useState<RangeDraft | null>(null)
+  const [activeTool, setActiveTool] = useState<ConstraintTool>('weather')
   const [selectedSignalId, setSelectedSignalId] = useState(config.signals[0]?.signal_id ?? '')
-  const [manualSignalOverrides, setManualSignalOverrides] = useState<Record<string, ManualSignalOverrideUi>>({})
-  const simTime = frame.sim_time_s
-  const liveManualOverrides = useMemo(() => Object.fromEntries(Object.entries(manualSignalOverrides).filter(([, item]) => item.end_sim_time_s > simTime)), [manualSignalOverrides, simTime])
+  const [rangeDraft, setRangeDraft] = useState<RangeDraft | null>(null)
+  const [drawerResetKey, setDrawerResetKey] = useState(0)
 
-  const resetUi = () => { setRangeDraft(null); setManualSignalOverrides({}); props.onReset() }
+  const manualSignalOverrides = useMemo(() => Object.fromEntries(constraintState.signals.map((item) => [item.signal_id, { signal_id: item.signal_id, aspect: item.aspect, start_sim_time_s: item.start_time_s ?? frame.sim_time_s, end_sim_time_s: item.end_time_s ?? Number.POSITIVE_INFINITY }])), [constraintState.signals, frame.sim_time_s])
 
-  return <main className={`dashboard dashboard-v2 ${constraintsOpen ? 'constraints-open' : ''}`}><div className="dashboard-stage"><div className="dashboard-main-column">
-    <header className="topbar polished-topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="topbar-actions"><button type="button" className={`constraints-toggle ${constraintsOpen ? 'active' : ''}`} onClick={() => setConstraintsOpen((open) => !open)}><span>⚙</span> Constraints <b>{constraintsOpen ? '×' : '→'}</b></button><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></div></header>
-    <SimulationControls {...props} onReset={resetUi} />
-    <RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} constraintsOpen={constraintsOpen} activeConstraintTool={activeTool} rangeDraft={rangeDraft} onRangeDraft={(draft) => { setActiveTool(draft.kind); setRangeDraft(draft) }} onRangeDraftChange={setRangeDraft} onSignalSelect={(signalId) => { if (constraintsOpen) { setActiveTool('signal'); setSelectedSignalId(signalId) } }} selectedSignalId={selectedSignalId} manualSignalOverrides={liveManualOverrides} />
-    <FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} />
-    <div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} />
-    {playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}
-  </div><div className="drawer-slot" aria-hidden={!constraintsOpen}>{constraintsOpen && <ConstraintDrawer config={config} simTime={simTime} playback={playback} activeTool={activeTool} onTool={(tool) => { setActiveTool(tool); if (tool !== 'tsr' && tool !== 'maintenance') setRangeDraft(null) }} selectedSignalId={selectedSignalId} onSelectedSignal={setSelectedSignalId} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onInject={props.onInject} onSignalOverride={(item) => setManualSignalOverrides((current) => ({ ...current, [item.signal_id]: item }))} />}</div></div></main>
+  const resetUi = () => {
+    setRangeDraft(null)
+    setActiveTool('weather')
+    setDrawerResetKey((value) => value + 1)
+  }
+  const resetSimulation = () => { resetUi(); props.onReset() }
+  const resetConstraints = () => { resetUi(); props.onResetConstraints() }
+  const chooseTool = (tool: ConstraintTool) => { if (tool !== activeTool) setRangeDraft(null); setActiveTool(tool) }
+
+  return <main className={`dashboard ${constraintsOpen ? 'constraints-open' : ''}`}><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="topbar-actions"><button type="button" className={`constraints-toggle ${constraintsOpen ? 'open' : ''}`} onClick={() => setConstraintsOpen((open) => !open)}>Constraints {constraintsOpen ? '×' : '→'}</button><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></div></header><div className="dashboard-workspace"><div className="dashboard-main"><SimulationControls {...props} onReset={resetSimulation} onResetConstraints={resetConstraints} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} constraintsOpen={constraintsOpen} activeConstraintTool={activeTool} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onRangeDraftChange={setRangeDraft} onSignalSelect={(signalId) => { setSelectedSignalId(signalId); setActiveTool('signal') }} selectedSignalId={selectedSignalId} manualSignalOverrides={manualSignalOverrides} constraintState={constraintState} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} /></div>{constraintsOpen && <ConstraintDrawer key={drawerResetKey} config={config} simTime={frame.sim_time_s} playback={playback} activeTool={activeTool} onTool={chooseTool} selectedSignalId={selectedSignalId} onSelectedSignal={setSelectedSignalId} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onInject={props.onInject} />}</div>{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
 }
