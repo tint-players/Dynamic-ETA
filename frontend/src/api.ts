@@ -1,4 +1,4 @@
-import type { SessionCreateResponse, SocketMessage } from './types'
+import type { ManualInjectionRequest, SessionCreateResponse, SocketMessage } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 const WS_BASE = API_BASE.replace(/^http/, 'ws')
@@ -44,4 +44,9 @@ export function sendCommand(
 ): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) return
   socket.send(JSON.stringify(speed === undefined ? { command } : { command, speed }))
+}
+
+export function sendInjection(socket: WebSocket | null, request: ManualInjectionRequest): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return
+  socket.send(JSON.stringify(request))
 }
