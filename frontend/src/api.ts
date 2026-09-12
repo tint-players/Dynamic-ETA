@@ -11,9 +11,7 @@ export async function createSession(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scenario_name: scenarioName }),
   })
-  if (!response.ok) {
-    throw new Error(`Failed to create session: ${response.status}`)
-  }
+  if (!response.ok) throw new Error(`Failed to create session: ${response.status}`)
   return response.json() as Promise<SessionCreateResponse>
 }
 
@@ -28,18 +26,15 @@ export function connectSimulation(
   socket.onclose = () => onStatus('closed')
   socket.onerror = () => onStatus('error')
   socket.onmessage = (event) => {
-    try {
-      onMessage(JSON.parse(event.data) as SocketMessage)
-    } catch {
-      onMessage({ type: 'error', message: 'Received malformed server message' })
-    }
+    try { onMessage(JSON.parse(event.data) as SocketMessage) }
+    catch { onMessage({ type: 'error', message: 'Received malformed server message' }) }
   }
   return socket
 }
 
 export function sendCommand(
   socket: WebSocket | null,
-  command: 'play' | 'pause' | 'reset' | 'step' | 'set_speed',
+  command: 'play' | 'pause' | 'reset' | 'reset_constraints' | 'step' | 'set_speed',
   speed?: number,
 ): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) return
