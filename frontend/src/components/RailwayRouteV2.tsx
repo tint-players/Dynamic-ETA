@@ -39,6 +39,14 @@ function geometry(config: SimulatorConfigViz) {
   })
 }
 
+function metersToPixels(config: SimulatorConfigViz, meters: number): number {
+  return (meters / Math.max(1, config.route.total_length_m)) * (RIGHT - LEFT)
+}
+
+function visualLength(config: SimulatorConfigViz, meters: number, minPx: number, maxPx: number): number {
+  return Math.max(minPx, Math.min(maxPx, metersToPixels(config, meters)))
+}
+
 function bezierPoint(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
   const u = 1 - t
   const uu = u * u
@@ -191,7 +199,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
                 const idx = trackIndex(config, platform.track_id)
                 const p = poseAt(config, platform.route_position_m, idx)
                 const side = idx === 0 ? -1 : 1
-                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x="-23" y={side < 0 ? -34 : 22} width="46" height="12" rx="3" /></g>
+                const platformLengthPx = visualLength(config, platform.length_m, 16, 46)
+                return <g key={platform.platform_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`}><rect x={-platformLengthPx / 2} y={side < 0 ? -34 : 22} width={platformLengthPx} height="12" rx="3" /></g>
               })}
               {(() => {
                 const p = poseAt(config, station.platforms[0].route_position_m, 0)
@@ -217,21 +226,28 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
             return <g key={signal.signal_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`} className="svg-signal"><line x1="0" y1="0" x2="0" y2={side * 28} /><circle cx="0" cy={side * 34} r="7" className={`svg-signal-light ${aspect.toLowerCase()}`} /><text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-p.angleDeg} 0 ${labelY})`}>{signal.signal_id}</text></g>
           })}
 
-          {config.environment.crossings.map((crossing) => {
+          {config.environment.crossings.map((crossing, crossingIndex) => {
             const fallback = activeAt(crossing.timeline, simTime)?.state ?? 'CLOSED_FOR_TRAIN'
             const state = crossingStates[crossing.crossing_id] ?? fallback
             const trainMustStop = state === 'CLOSED_FOR_TRAIN'
             const center = centerPoseAt(config, crossing.route_position_m)
             const visualClass = trainMustStop ? 'road-open' : 'road-closed'
-            const statusText = trainMustStop ? 'ROAD OPEN · TRAIN STOP' : 'ROAD CLOSED · TRAIN CLEAR'
-            return <g key={crossing.crossing_id} transform={`translate(${center.x} ${center.y}) rotate(${center.angleDeg})`} className={`svg-crossing ${visualClass}`}><line className="crossing-road-bed" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-road-mark" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-gate" x1="-18" y1="-38" x2="18" y2="-38" /><line className="crossing-gate" x1="-18" y1="38" x2="18" y2="38" /><text x="12" y="-58">{crossing.crossing_id} · {statusText}</text></g>
+            const statusText = trainMustStop ? 'ROAD OPEN' : 'ROAD CLOSED'
+            const railText = trainMustStop ? 'TRAIN STOP' : 'RAIL PROTECTED'
+            const labelY = crossingIndex % 2 === 0 ? -68 : 78
+            return <g key={crossing.crossing_id} transform={`translate(${center.x} ${center.y}) rotate(${center.angleDeg})`} className={`svg-crossing ${visualClass}`}><line className="crossing-road-bed" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-road-mark" x1="0" y1="-54" x2="0" y2="54" /><line className="crossing-gate" x1="-18" y1="-38" x2="18" y2="-38" /><line className="crossing-gate" x1="-18" y1="38" x2="18" y2="38" /><text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-center.angleDeg} 0 ${labelY})`}><tspan x="0" dy="0">{crossing.crossing_id} · {statusText}</tspan><tspan x="0" dy="13">{railText}</tspan></text></g>
           })}
 
           {frames.map((frame, index) => {
             const pose = displayPose(config, frame)
             const reverse = frame.direction === 'REVERSE'
             const selected = frame.train_id === selectedTrainId
-            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}><g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body"><rect x="-22" y="-12" width="42" height="20" rx="5" /><path d="M 12 -12 L 22 -6 L 22 5 L 12 8 Z" /><rect x="-12" y="-8" width="8" height="6" rx="1" className="train-window" /><rect x="-1" y="-8" width="8" height="6" rx="1" className="train-window" /><circle cx="-11" cy="10" r="3" /><circle cx="11" cy="10" r="3" /></g><text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text></g>
+            const run = config.trains.find((item) => item.train.train_id === frame.train_id)
+            const trainLengthPx = visualLength(config, run?.train.length_m ?? config.train.length_m, 16, 38)
+            const nosePx = Math.min(6, trainLengthPx * 0.3)
+            const rearWheelX = -trainLengthPx * 0.75
+            const frontWheelX = -trainLengthPx * 0.2
+            return <g key={frame.train_id} transform={`translate(${pose.x} ${pose.y})`} className={`svg-train-position train-${index % 4} ${frame.active ? 'active' : 'waiting'} ${frame.completed ? 'completed' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelectTrain(frame.train_id)}><g transform={`rotate(${pose.angleDeg}) ${reverse ? 'scale(-1 1)' : ''}`} className="svg-train-body"><rect x={-trainLengthPx} y="-12" width={trainLengthPx} height="20" rx="5" /><path d={`M ${-nosePx} -12 L 0 -6 L 0 5 L ${-nosePx} 8 Z`} /><rect x={-trainLengthPx * 0.7} y="-8" width={Math.max(4, trainLengthPx * 0.2)} height="6" rx="1" className="train-window" /><rect x={-trainLengthPx * 0.4} y="-8" width={Math.max(4, trainLengthPx * 0.2)} height="6" rx="1" className="train-window" /><circle cx={rearWheelX} cy="10" r="3" /><circle cx={frontWheelX} cy="10" r="3" /></g><text x="0" y="-28" textAnchor="middle" className="train-speed-label">{frame.train_id} · {frame.speed_kmh.toFixed(0)}</text></g>
           })}
 
           <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">DELHI SIDE</text>
@@ -245,7 +261,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
         <span>⇄ = physical crossover</span>
         <span>reverse trains stay upright</span>
         <span className="crossing-legend road-open-legend">● road open = train stop before crossing</span>
-        <span className="crossing-legend road-closed-legend">● road closed = train clear</span>
+        <span className="crossing-legend road-closed-legend">● road closed = rail protected</span>
         <span><i className="legend-swatch tsr-swatch" />TSR</span>
         <span><i className="legend-swatch maintenance-swatch" />Maintenance</span>
       </div>
