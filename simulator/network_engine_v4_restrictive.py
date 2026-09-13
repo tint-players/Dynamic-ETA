@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import SignalAspect, WeatherCondition
+from .models import SignalAspect, SignalType, WeatherCondition
 from .network_engine import RuntimeTrain, Target
 from .network_engine_v4 import NetworkSimulationEngineV4
 
@@ -82,12 +82,20 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
             signed_distance = (position - train.route_position_m) * train.sign
             if signed_distance >= -1e-6:
                 ahead.append((signed_distance, signal))
-            else:
+            elif signal.signal_type == SignalType.STANDARD:
                 behind.append((-signed_distance, signal))
 
         ahead.sort(key=lambda item: item[0])
         behind.sort(key=lambda item: item[0])
-        next_signal = ahead[0][1] if ahead else None
+        next_signal = next(
+            (
+                signal
+                for _, signal in ahead
+                if signal.signal_type == SignalType.STANDARD
+                or self.signal_aspect(signal, exclude=train) != SignalAspect.GREEN
+            ),
+            None,
+        )
         previous_signal = behind[0][1] if behind else None
 
         if next_signal is not None:
