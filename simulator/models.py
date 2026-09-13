@@ -12,6 +12,11 @@ class SignalAspect(str, Enum):
     RED = "RED"
 
 
+class SignalType(str, Enum):
+    STANDARD = "STANDARD"
+    ROUTE_INDICATOR = "ROUTE_INDICATOR"
+
+
 class WeatherCondition(str, Enum):
     CLEAR = "CLEAR"
     RAIN = "RAIN"
@@ -96,6 +101,18 @@ class Signal(BaseModel):
     protected_block_id: str
     track_id: str = "TRACK-1"
     direction: TrainDirection = TrainDirection.FORWARD
+    signal_type: SignalType = SignalType.STANDARD
+    position_in_block_m: Optional[float] = Field(default=None, ge=0)
+    crossover_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_route_indicator(self):
+        if self.signal_type == SignalType.ROUTE_INDICATOR:
+            if self.position_in_block_m is None:
+                raise ValueError("route-indicator signal requires position_in_block_m")
+            if self.crossover_id is None:
+                raise ValueError("route-indicator signal requires crossover_id")
+        return self
 
 
 class InitialTrainState(BaseModel):
@@ -113,6 +130,7 @@ class TrainConfig(BaseModel):
     accel_ms2: float = Field(gt=0)
     service_decel_ms2: float = Field(gt=0)
     emergency_decel_ms2: float = Field(gt=0)
+    dual_cab: bool = False
     initial_state: InitialTrainState
 
 
@@ -165,6 +183,7 @@ class Crossover(BaseModel):
 class TrackChangePlan(BaseModel):
     crossover_id: str
     reverse_after_change: bool = False
+    turnaround_signal_id: Optional[str] = None
 
 
 class TrainRun(BaseModel):
@@ -273,7 +292,7 @@ class SimulationConfig(BaseModel):
         if train.initial_state.position_in_block_m > start_block.length_m:
             raise ValueError(f"{label} initial position exceeds start block length")
         if train.initial_state.initial_speed_kmh > train.max_speed_kmh:
-            raise ValueError(f"{label}.initial_speed_kmh cannot exceed train max_speed_kmh")
+            raise ValueError(f"{label}.initial_state.initial_speed_kmh cannot exceed train max_speed_kmh")
 
     def _validate_journey(self, journey: Journey, label: str, block_ids: set[str]) -> tuple[float, float]:
         for endpoint_name, endpoint in (("source", journey.source), ("destination", journey.destination)):
@@ -295,6 +314,7 @@ class SimulationConfig(BaseModel):
         signal_ids = [s.signal_id for s in self.signals]
         if len(signal_ids) != len(set(signal_ids)):
             raise ValueError("signal_id values must be unique")
+        signal_set = set(signal_ids)
 
         self._validate_train(self.train, "train", block_ids, track_ids)
         primary_source, primary_destination = self._validate_journey(self.journey, "journey", block_ids)
@@ -306,6 +326,10 @@ class SimulationConfig(BaseModel):
                 raise ValueError(f"Signal {signal.signal_id} references unknown block {signal.protected_block_id}")
             if signal.track_id not in track_ids:
                 raise ValueError(f"Signal {signal.signal_id} references unknown track {signal.track_id}")
+            if signal.position_in_block_m is not None:
+                block = self.route.blocks[self.route.block_index(signal.protected_block_id)]
+                if signal.position_in_block_m > block.length_m:
+                    raise ValueError(f"Signal {signal.signal_id} position exceeds block length")
 
         station_ids = [station.station_id for station in self.stations]
         if len(station_ids) != len(set(station_ids)):
@@ -337,6 +361,10 @@ class SimulationConfig(BaseModel):
                 raise ValueError(f"Crossover {crossover.crossover_id} exceeds block length")
         crossover_set = set(crossover_ids)
 
+        for signal in self.signals:
+            if signal.crossover_id is not None and signal.crossover_id not in crossover_set:
+                raise ValueError(f"Signal {signal.signal_id} references unknown crossover {signal.crossover_id}")
+
         station_set = set(station_ids)
         for stop in self.primary_station_stops:
             if stop.station_id not in station_set:
@@ -344,6 +372,8 @@ class SimulationConfig(BaseModel):
         for change in self.primary_track_changes:
             if change.crossover_id not in crossover_set:
                 raise ValueError(f"Primary track change references unknown crossover {change.crossover_id}")
+            if change.turnaround_signal_id is not None and change.turnaround_signal_id not in signal_set:
+                raise ValueError(f"Primary track change references unknown turnaround signal {change.turnaround_signal_id}")
 
         train_ids = [self.train.train_id]
         for i, run in enumerate(self.additional_train_runs):
@@ -356,10 +386,11 @@ class SimulationConfig(BaseModel):
             for change in run.track_changes:
                 if change.crossover_id not in crossover_set:
                     raise ValueError(f"Train {run.train.train_id} references unknown crossover {change.crossover_id}")
+                if change.turnaround_signal_id is not None and change.turnaround_signal_id not in signal_set:
+                    raise ValueError(f"Train {run.train.train_id} references unknown turnaround signal {change.turnaround_signal_id}")
         if len(train_ids) != len(set(train_ids)):
             raise ValueError("train_id values must be unique across all train runs")
 
-        signal_set = set(signal_ids)
         for schedule in self.environment.signal_states:
             if schedule.signal_id not in signal_set:
                 raise ValueError(f"Signal schedule references unknown signal {schedule.signal_id}")
