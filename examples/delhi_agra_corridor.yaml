@@ -20,17 +20,17 @@ signals:
   - {signal_id: "UP-05", protected_block_id: "BLK-05", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "UP-06", protected_block_id: "BLK-06", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "UP-07", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD"}
-  - {signal_id: "AGRA-X-UP", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD", signal_type: "ROUTE_INDICATOR", position_in_block_m: 1700, crossover_id: "XOVER-AGRA-01"}
   - {signal_id: "UP-08", protected_block_id: "BLK-08", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "DN-08", protected_block_id: "BLK-08", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-07", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE"}
-  - {signal_id: "AGRA-X-DN", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE", signal_type: "ROUTE_INDICATOR", position_in_block_m: 2300, crossover_id: "XOVER-AGRA-01"}
   - {signal_id: "DN-06", protected_block_id: "BLK-06", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-05", protected_block_id: "BLK-05", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-04", protected_block_id: "BLK-04", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-03", protected_block_id: "BLK-03", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-02", protected_block_id: "BLK-02", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-01", protected_block_id: "BLK-01", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "AGRA-X-UP", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD", signal_type: "ROUTE_INDICATOR", position_in_block_m: 1700, crossover_id: "XOVER-AGRA-01"}
+  - {signal_id: "AGRA-X-DN", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE", signal_type: "ROUTE_INDICATOR", position_in_block_m: 2300, crossover_id: "XOVER-AGRA-01"}
 
 dynamic_signalling: true
 
