@@ -7,7 +7,9 @@ from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
 from simulator.models import (
     MaintenanceRestriction,
     SignalAspect,
+    SignalType,
     TemporarySpeedRestriction,
+    TrainDirection,
     WeatherCondition,
     WeatherTimelineEntry,
 )
@@ -189,3 +191,70 @@ def test_session_live_injection_mutates_current_run_and_reset_restores_yaml_base
     assert session.config.environment.maintenance_restrictions == []
     assert session.engine.manual_signal_overrides() == {}
     assert session.engine.sim_time_s == 0
+
+
+def test_agra_single_crossover_configuration_is_scoped_to_special_signals_and_primary_dual_cab():
+    config = _config()
+    blk07 = next(block for block in config.route.blocks if block.block_id == "BLK-07")
+    assert blk07.length_m == 3400
+
+    up_signal = next(signal for signal in config.signals if signal.signal_id == "AGRA-X-UP")
+    down_signal = next(signal for signal in config.signals if signal.signal_id == "AGRA-X-DN")
+    assert up_signal.signal_type == SignalType.ROUTE_INDICATOR
+    assert down_signal.signal_type == SignalType.ROUTE_INDICATOR
+    assert up_signal.crossover_id == "XOVER-AGRA-01"
+    assert down_signal.crossover_id == "XOVER-AGRA-01"
+    assert all(
+        signal.signal_type == SignalType.STANDARD
+        for signal in config.signals
+        if signal.signal_id not in {"AGRA-X-UP", "AGRA-X-DN"}
+    )
+
+    assert config.train.dual_cab is True
+    plan = config.primary_track_changes[0]
+    assert plan.crossover_id == "XOVER-AGRA-01"
+    assert plan.reverse_after_change is True
+    assert plan.turnaround_signal_id == "DN-07"
+
+
+def test_agra_turnaround_crosses_then_clears_then_reverses_without_moving_the_train_body():
+    config = _config()
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="agra-turnaround")
+    train = next(item for item in engine.trains if item.train.train_id == "TRAIN-12002")
+    for other in engine.trains:
+        if other is not train:
+            other.completed = True
+
+    crossover = next(item for item in config.crossovers if item.crossover_id == "XOVER-AGRA-01")
+    start, end, midpoint = engine._crossover_bounds(crossover)
+    train.current_track_id = crossover.from_track_id
+    train.source_m = midpoint - 1000
+    train.destination_m = config.route.total_length_m
+    train.route_position_m = midpoint - 1
+
+    reason, turned_around = engine._apply_track_change_v4(train, midpoint - 1, midpoint + 1)
+    assert reason == "CROSSOVER:XOVER-AGRA-01"
+    assert turned_around is False
+    assert train.current_track_id == crossover.to_track_id
+    assert train.direction == TrainDirection.FORWARD
+    assert getattr(train, "pending_turnaround_crossover_id") == "XOVER-AGRA-01"
+
+    plan = config.primary_track_changes[0]
+    stop_position = engine._turnaround_stop_position(train, plan)
+    assert stop_position is not None
+    assert stop_position > end + train.train.length_m
+
+    train.route_position_m = stop_position
+    train.speed_kmh = 0.0
+    body_before = engine._body_bounds(train)
+    assert body_before[0] > end
+
+    engine._update_crossover_reservations()
+    reverse_signal = next(signal for signal in config.signals if signal.signal_id == "AGRA-X-DN")
+    assert engine.signal_aspect(reverse_signal, exclude=train) == SignalAspect.GREEN
+
+    turn_reason = engine._begin_pending_turnaround_if_stopped(train)
+    assert turn_reason == "TURNAROUND:XOVER-AGRA-01"
+    assert train.direction == TrainDirection.REVERSE
+    assert getattr(train, "pending_turnaround_crossover_id") is None
+    assert engine._body_bounds(train) == pytest.approx(body_before)
