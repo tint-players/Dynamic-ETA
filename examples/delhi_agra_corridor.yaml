@@ -9,7 +9,7 @@ route:
     - {block_id: "BLK-04", length_m: 2200, speed_limit_kmh: 130, gradient_percent: 0.0, curve_radius_m: 1100, curve_speed_limit_kmh: 105, curve_direction: "LEFT"}
     - {block_id: "BLK-05", length_m: 3000, speed_limit_kmh: 110, gradient_percent: 0.5, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
     - {block_id: "BLK-06", length_m: 2000, speed_limit_kmh: 100, gradient_percent: -0.2, curve_radius_m: 900, curve_speed_limit_kmh: 90, curve_direction: "LEFT"}
-    - {block_id: "BLK-07", length_m: 2400, speed_limit_kmh: 110, gradient_percent: 0.1, curve_radius_m: 1250, curve_speed_limit_kmh: 100, curve_direction: "RIGHT"}
+    - {block_id: "BLK-07", length_m: 3400, speed_limit_kmh: 110, gradient_percent: 0.1, curve_radius_m: 1250, curve_speed_limit_kmh: 100, curve_direction: "RIGHT"}
     - {block_id: "BLK-08", length_m: 2000, speed_limit_kmh: 110, gradient_percent: 0.0, curve_radius_m: null, curve_speed_limit_kmh: null, curve_direction: null}
 
 signals:
@@ -20,9 +20,11 @@ signals:
   - {signal_id: "UP-05", protected_block_id: "BLK-05", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "UP-06", protected_block_id: "BLK-06", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "UP-07", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD"}
+  - {signal_id: "AGRA-X-UP", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD", signal_type: "ROUTE_INDICATOR", position_in_block_m: 1700, crossover_id: "XOVER-AGRA-01"}
   - {signal_id: "UP-08", protected_block_id: "BLK-08", track_id: "TRACK-UP", direction: "FORWARD"}
   - {signal_id: "DN-08", protected_block_id: "BLK-08", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-07", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE"}
+  - {signal_id: "AGRA-X-DN", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE", signal_type: "ROUTE_INDICATOR", position_in_block_m: 2300, crossover_id: "XOVER-AGRA-01"}
   - {signal_id: "DN-06", protected_block_id: "BLK-06", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-05", protected_block_id: "BLK-05", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-04", protected_block_id: "BLK-04", track_id: "TRACK-DOWN", direction: "REVERSE"}
@@ -49,6 +51,7 @@ train:
   accel_ms2: 0.5
   service_decel_ms2: 0.7
   emergency_decel_ms2: 1.0
+  dual_cab: true
   initial_state: {start_block_id: "BLK-01", position_in_block_m: 0, initial_speed_kmh: 0}
 
 journey:
@@ -62,7 +65,7 @@ primary_station_stops:
   - {station_id: "BALLABGARH", dwell_time_s: 30}
 
 primary_track_changes:
-  - {crossover_id: "XOVER-AGRA-01", reverse_after_change: true}
+  - {crossover_id: "XOVER-AGRA-01", reverse_after_change: true, turnaround_signal_id: "DN-07"}
 
 additional_train_runs:
   - train:
