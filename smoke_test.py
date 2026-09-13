@@ -13,7 +13,7 @@ from simulator.models import SignalAspect, SignalStateSchedule, SignalTimelineEn
 config = load_simulation_config("examples/delhi_agra_corridor.yaml")
 assert len(config.route.blocks) == 8
 assert len(config.route.track_ids) == 2
-assert len(config.signals) == 16
+assert len(config.signals) == 18
 
 # 1. Full source-to-destination run using the legacy single-train engine.
 # This remains a regression check for Component A primary-train physics.
