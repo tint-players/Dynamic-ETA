@@ -22,7 +22,10 @@ def config_for_visualization(config: SimulationConfig) -> dict:
     for signal in config.signals:
         block_start = route.block_start_distance_m(signal.protected_block_id)
         block = route.blocks[route.block_index(signal.protected_block_id)]
-        position = block_start if signal.direction == TrainDirection.FORWARD else block_start + block.length_m
+        if signal.position_in_block_m is not None:
+            position = block_start + signal.position_in_block_m
+        else:
+            position = block_start if signal.direction == TrainDirection.FORWARD else block_start + block.length_m
         signals.append({**signal.model_dump(mode="json"), "route_position_m": position})
 
     def restrictions(items):
