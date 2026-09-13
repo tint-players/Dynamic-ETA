@@ -292,7 +292,7 @@ class SimulationConfig(BaseModel):
         if train.initial_state.position_in_block_m > start_block.length_m:
             raise ValueError(f"{label} initial position exceeds start block length")
         if train.initial_state.initial_speed_kmh > train.max_speed_kmh:
-            raise ValueError(f"{label}.initial_state.initial_speed_kmh cannot exceed train max_speed_kmh")
+            raise ValueError(f"{label}.initial_speed_kmh cannot exceed train max_speed_kmh")
 
     def _validate_journey(self, journey: Journey, label: str, block_ids: set[str]) -> tuple[float, float]:
         for endpoint_name, endpoint in (("source", journey.source), ("destination", journey.destination)):
