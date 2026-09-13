@@ -66,7 +66,7 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         if crossover is None:
             return None
         for train in self.trains:
-            if train.completed or self.sim_time_s < train.departure_time_s:
+            if self.sim_time_s < train.departure_time_s:
                 continue
             plan = self._train_plan_for_crossover(train, crossover_id)
             if plan is None or plan.reverse_after_change:
