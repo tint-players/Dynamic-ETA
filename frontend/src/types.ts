@@ -1,4 +1,5 @@
 export type SignalAspect = 'GREEN' | 'YELLOW' | 'RED'
+export type SignalType = 'STANDARD' | 'ROUTE_INDICATOR'
 export type WeatherCondition = 'CLEAR' | 'RAIN' | 'HEAVY_RAIN' | 'FOG' | 'HEAVY_FOG'
 export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
 export type TrainDirection = 'FORWARD' | 'REVERSE'
@@ -20,6 +21,9 @@ export interface SignalViz {
   protected_block_id: string
   track_id: string
   direction: TrainDirection
+  signal_type: SignalType
+  position_in_block_m: number | null
+  crossover_id: string | null
   route_position_m: number
 }
 
@@ -67,6 +71,7 @@ export interface TrainConfigViz {
   accel_ms2: number
   service_decel_ms2: number
   emergency_decel_ms2: number
+  dual_cab: boolean
 }
 
 export interface StationPlatformViz {
@@ -85,7 +90,7 @@ export interface TrainRunViz {
   journey: { source: { block_id: string; position_in_block_m: number }; destination: { block_id: string; position_in_block_m: number } }
   departure_time_s: number
   station_stops: Array<{ station_id: string; dwell_time_s: number }>
-  track_changes: Array<{ crossover_id: string; reverse_after_change: boolean }>
+  track_changes: Array<{ crossover_id: string; reverse_after_change: boolean; turnaround_signal_id: string | null }>
   source_route_m: number
   destination_route_m: number
 }
