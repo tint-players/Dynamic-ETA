@@ -32,10 +32,7 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
     CROSSING_CLEARANCE_MARGIN_M = 20.0
     CROSSING_REOPEN_DELAY_S = 5.0
 
-    # Front of train must stop this far before a RED signal post. This is a
-    # simulator protection margin, not a claim about a railway-standard value.
     SIGNAL_STOP_MARGIN_M = 20.0
-
     CROSSOVER_RESERVATION_APPROACH_M = 650.0
     CROSSOVER_STOP_MARGIN_M = 70.0
 
@@ -111,8 +108,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
         start = self.config.route.block_start_distance_m(block.block_id)
         end = start + block.length_m
         for train in self.trains:
-            # completed means the train has exited this simulated corridor; it is
-            # kept in telemetry/fleet history but no longer occupies active track.
             if train is exclude or train.completed or self.sim_time_s < train.departure_time_s:
                 continue
             if track_id not in self._occupancy_tracks(train):
@@ -163,9 +158,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             owner_id = self._crossover_reservations.get(cid)
             start, end, _ = self._crossover_bounds(crossover)
 
-            # First decide whether an existing owner still legitimately holds the
-            # interlocking. This supports both planned crossover users and normal
-            # trains that happened to already occupy one of the parallel tracks.
             if owner_id is not None:
                 owner = next((t for t in self.trains if t.train.train_id == owner_id), None)
                 keep = False
@@ -185,9 +177,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             if owner_id is not None:
                 continue
 
-            # An already occupied conflict zone always gets priority. This prevents
-            # assigning a switch movement across a train that is already passing on
-            # one of the connected tracks.
             occupants: list[RuntimeTrain] = []
             connected = {crossover.from_track_id, crossover.to_track_id}
             for train in self.trains:
@@ -201,8 +190,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
                 self._crossover_reservations[cid] = occupants[0].train.train_id
                 continue
 
-            # Otherwise reserve ahead of time for the nearest train that actually
-            # has a route plan to change track at this crossover.
             candidates: list[tuple[float, RuntimeTrain]] = []
             for train in self.trains:
                 if train.completed or self.sim_time_s < train.departure_time_s:
@@ -243,8 +230,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
 
             if zone_ahead is None:
                 continue
-            # If reservation is established unusually late, stop at the current
-            # front position rather than allowing the train to enter the zone.
             if self._ahead(train, stop_pos) is None:
                 stop_pos = train.route_position_m
             targets.append(Target(stop_pos, 0.0, f"CROSSOVER_RESERVED:{crossover.crossover_id}", True))
@@ -273,7 +258,9 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             return None
 
         original_source = train.source_m
-        train.source_m = train.route_position_m
+        new_front = train.route_position_m - train.sign * train.train.length_m
+        train.route_position_m = new_front
+        train.source_m = new_front
         train.destination_m = original_source
         train.pending_turnaround_crossover_id = None
         return f"TURNAROUND:{plan.crossover_id}"
@@ -350,9 +337,6 @@ class NetworkSimulationEngineV4(NetworkSimulationEngineV3):
             if target.reason.startswith("RED_SIGNAL:"):
                 signal_position = target.position_m
                 stop_line = signal_position - train.sign * self.SIGNAL_STOP_MARGIN_M
-                # If the signal became RED after the train already entered the
-                # margin, stop immediately rather than allowing its front to reach
-                # or pass the signal post.
                 if self._ahead(train, stop_line) is None and self._ahead(train, signal_position) is not None:
                     stop_line = train.route_position_m
                 adjusted.append(Target(stop_line, 0.0, target.reason, True))
