@@ -156,7 +156,7 @@ function routeIndicatorLit(config: SimulatorConfigViz, frames: TelemetryFrame[],
     if (!frame.active || frame.direction !== 'FORWARD') return false
     const run = config.trains.find((item) => item.train.train_id === frame.train_id)
     const plan = run?.track_changes.find((item) => item.crossover_id === crossover.crossover_id)
-    if (!plan) return false
+    if (!run || !plan) return false
     const approachStart = signal.route_position_m - 650
     const clearPoint = crossover.route_end_m + run.train.length_m
     return frame.route_position_m >= approachStart && frame.route_position_m <= clearPoint
