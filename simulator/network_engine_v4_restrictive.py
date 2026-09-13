@@ -60,10 +60,59 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
     def clear_manual_signal_overrides(self) -> None:
         self._manual_signal_overrides.clear()
 
+    def _agra_forward_crossover_train(self) -> RuntimeTrain | None:
+        crossover_id = "XOVER-AGRA-01"
+        crossover = self._crossovers.get(crossover_id)
+        if crossover is None:
+            return None
+        for train in self.trains:
+            if train.completed or self.sim_time_s < train.departure_time_s:
+                continue
+            plan = self._train_plan_for_crossover(train, crossover_id)
+            if plan is None or plan.reverse_after_change:
+                continue
+            if crossover_id not in train.completed_crossovers:
+                continue
+            if train.current_track_id != crossover.to_track_id or train.sign <= 0:
+                continue
+            return train
+        return None
+
+    def _agra_dn07_has_other_occupancy(
+        self,
+        forward_crossover_train: RuntimeTrain,
+        exclude: RuntimeTrain | None,
+    ) -> bool:
+        block_index = self.config.route.block_index("BLK-07")
+        block = self.config.route.blocks[block_index]
+        block_start = self.config.route.block_start_distance_m(block.block_id)
+        block_end = block_start + block.length_m
+        for train in self.trains:
+            if train is forward_crossover_train or train is exclude:
+                continue
+            if train.completed or self.sim_time_s < train.departure_time_s:
+                continue
+            if "TRACK-DOWN" not in self._occupancy_tracks(train):
+                continue
+            body_start, body_end = self._body_bounds(train)
+            if self._intervals_overlap(body_start, body_end, block_start, block_end):
+                return True
+        return False
+
     def signal_aspect(self, signal, exclude: RuntimeTrain | None = None) -> SignalAspect:
         override = self.manual_signal_overrides().get(signal.signal_id)
         if override is not None:
             return override
+
+        forward_crossover_train = self._agra_forward_crossover_train()
+        if forward_crossover_train is not None:
+            if signal.signal_id == "DN-08":
+                return SignalAspect.RED
+            if signal.signal_id == "DN-07":
+                if self._agra_dn07_has_other_occupancy(forward_crossover_train, exclude):
+                    return SignalAspect.RED
+                return SignalAspect.YELLOW
+
         return super().signal_aspect(signal, exclude=exclude)
 
     def _directional_signals(self, train: RuntimeTrain):
