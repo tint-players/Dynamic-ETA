@@ -29,16 +29,16 @@ signals:
   - {signal_id: "DN-03", protected_block_id: "BLK-03", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-02", protected_block_id: "BLK-02", track_id: "TRACK-DOWN", direction: "REVERSE"}
   - {signal_id: "DN-01", protected_block_id: "BLK-01", track_id: "TRACK-DOWN", direction: "REVERSE"}
-  - {signal_id: "AGRA-X-UP", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD", signal_type: "ROUTE_INDICATOR", position_in_block_m: 1700, crossover_id: "XOVER-AGRA-01"}
-  - {signal_id: "AGRA-X-DN", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE", signal_type: "ROUTE_INDICATOR", position_in_block_m: 2300, crossover_id: "XOVER-AGRA-01"}
+  - {signal_id: "AGRA-X-UP", protected_block_id: "BLK-07", track_id: "TRACK-UP", direction: "FORWARD", signal_type: "ROUTE_INDICATOR", position_in_block_m: 1900, crossover_id: "XOVER-AGRA-01"}
+  - {signal_id: "AGRA-X-DN", protected_block_id: "BLK-07", track_id: "TRACK-DOWN", direction: "REVERSE", signal_type: "ROUTE_INDICATOR", position_in_block_m: 2500, crossover_id: "XOVER-AGRA-01"}
 
 dynamic_signalling: true
 
 crossovers:
   - crossover_id: "XOVER-AGRA-01"
     block_id: "BLK-07"
-    start_position_m: 1800
-    end_position_m: 2200
+    start_position_m: 2000
+    end_position_m: 2400
     from_track_id: "TRACK-UP"
     to_track_id: "TRACK-DOWN"
 
