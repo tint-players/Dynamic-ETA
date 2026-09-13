@@ -236,7 +236,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
     if (end > block.length_m) { start -= end - block.length_m; end = block.length_m }
     start = Math.max(0, start)
     end = Math.min(block.length_m, end)
-    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, start_position_in_block_m: Math.round(start), end_position_in_block_m: Math.round(end) } as never)
+    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, start_position_m: Math.round(start), end_position_m: Math.round(end) })
   }
 
   const dragRange = (clientX: number) => {
