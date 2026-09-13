@@ -99,6 +99,23 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
                 return True
         return False
 
+    def _agra_turnaround_has_reversed(self) -> bool:
+        crossover_id = "XOVER-AGRA-01"
+        crossover = self._crossovers.get(crossover_id)
+        if crossover is None:
+            return False
+        for train in self.trains:
+            plan = self._train_plan_for_crossover(train, crossover_id)
+            if plan is None or not plan.reverse_after_change:
+                continue
+            if crossover_id not in train.completed_crossovers:
+                continue
+            if train.current_track_id != crossover.to_track_id:
+                continue
+            if train.sign < 0 and getattr(train, "pending_turnaround_crossover_id", None) is None:
+                return True
+        return False
+
     def signal_aspect(self, signal, exclude: RuntimeTrain | None = None) -> SignalAspect:
         override = self.manual_signal_overrides().get(signal.signal_id)
         if override is not None:
@@ -109,6 +126,8 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
             if signal.signal_id == "DN-08":
                 return SignalAspect.RED
             if signal.signal_id == "DN-07":
+                if self._agra_turnaround_has_reversed():
+                    return super().signal_aspect(signal, exclude=exclude)
                 if self._agra_dn07_has_other_occupancy(forward_crossover_train, exclude):
                     return SignalAspect.RED
                 return SignalAspect.YELLOW
