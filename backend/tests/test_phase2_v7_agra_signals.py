@@ -6,9 +6,9 @@ from simulator.network_engine_v4 import NetworkSimulationEngineV4
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
 
 
-def test_agra_dn_signals_follow_forward_crossover_exception_then_return_to_dynamic():
+def test_agra_dn_signals_follow_forward_crossover_exception_after_train_finishes():
     config = SessionManager.load_scenario("delhi_agra_corridor.yaml").model_copy(deep=True)
-    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="agra-v7-signals")
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="agra-v8-signals")
 
     cross_up = next(train for train in engine.trains if train.train.train_id == "TRAIN-CROSS-UP")
     turnaround = next(train for train in engine.trains if train.train.train_id == "TRAIN-12002")
@@ -41,8 +41,15 @@ def test_agra_dn_signals_follow_forward_crossover_exception_then_return_to_dynam
     assert engine.signal_aspect(dn07) == SignalAspect.YELLOW
     assert engine.signal_aspect(dn08) == SignalAspect.RED
 
+    # The simulator keeps completed trains rendered at their destination. The
+    # special Agra protection must therefore stay active after TRAIN-CROSS-UP has
+    # completed, matching what the operator still sees on the diagram.
+    cross_up.completed = True
+    assert engine.signal_aspect(dn07) == SignalAspect.YELLOW
+    assert engine.signal_aspect(dn08) == SignalAspect.RED
+
     # If TRAIN-12002 also occupies BLK-07 on TRACK-DOWN, DN-07 must remain RED
-    # for occupied-block protection; DN-08 stays RED under the crossover exception.
+    # for occupied-block protection; DN-08 stays RED under the crossover rule.
     turnaround.completed = False
     turnaround.departure_time_s = 0
     turnaround.current_track_id = "TRACK-DOWN"
@@ -52,8 +59,3 @@ def test_agra_dn_signals_follow_forward_crossover_exception_then_return_to_dynam
     turnaround.destination_m = 0
     assert engine.signal_aspect(dn07) == SignalAspect.RED
     assert engine.signal_aspect(dn08) == SignalAspect.RED
-
-    # The DN-08 rule is conditional, not permanent. Once TRAIN-CROSS-UP is no
-    # longer active, the normal dynamic result is used again.
-    cross_up.completed = True
-    assert engine.signal_aspect(dn08) == NetworkSimulationEngineV4.signal_aspect(engine, dn08)
