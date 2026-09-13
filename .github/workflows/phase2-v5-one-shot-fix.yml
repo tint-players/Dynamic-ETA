@@ -1,0 +1,44 @@
+name: phase2-v5 one-shot frontend fix
+
+on:
+  push:
+    branches:
+      - phase2-v5
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase2-v5
+          fetch-depth: 0
+      - name: Apply narrow TypeScript guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/components/RailwayRouteV2.tsx')
+          s = p.read_text()
+          old = "    if (!plan) return false\n    const approachStart = signal.route_position_m - 650\n    const clearPoint = crossover.route_end_m + run.train.length_m"
+          new = "    if (!run || !plan) return false\n    const approachStart = signal.route_position_m - 650\n    const clearPoint = crossover.route_end_m + run.train.length_m"
+          if old not in s:
+              raise SystemExit('Expected route-indicator guard not found; refusing broad edit')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Remove one-shot workflow from resulting commit
+        run: rm .github/workflows/phase2-v5-one-shot-fix.yml
+      - name: Verify only intended files are staged
+        run: |
+          git add frontend/src/components/RailwayRouteV2.tsx .github/workflows/phase2-v5-one-shot-fix.yml
+          git diff --cached --check
+          git diff --cached --name-only
+      - name: Commit narrow fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Fix route indicator train guard"
+          git push origin HEAD:phase2-v5
+# trigger
