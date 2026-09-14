@@ -5,6 +5,7 @@ export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
 export type TrainDirection = 'FORWARD' | 'REVERSE'
 export type MaintenanceType = 'SPEED_RESTRICTION' | 'FULL_CLOSURE'
 
+/** Shared logical/geographic block geometry. */
 export interface TrackBlockViz {
   block_id: string
   length_m: number
@@ -17,9 +18,18 @@ export interface TrackBlockViz {
   route_end_m: number
 }
 
+/** One operational physical-track section through shared block geometry. */
+export interface OperationalTrackBlockViz extends TrackBlockViz {
+  track_block_id: string
+  track_id: string
+  block_index: number
+  track_index: number
+}
+
 export interface SignalViz {
   signal_id: string
   protected_block_id: string
+  protected_track_block_id: string
   track_id: string
   direction: TrainDirection
   signal_type: SignalType
@@ -32,6 +42,7 @@ export interface RestrictionViz {
   restriction_id: string
   block_id: string
   track_id: string | null
+  track_block_id: string | null
   start_position_m: number
   end_position_m: number
   speed_limit_kmh: number
@@ -45,6 +56,8 @@ export interface RestrictionViz {
 export interface CrossingViz {
   crossing_id: string
   block_id: string
+  track_ids: string[]
+  affected_track_block_ids: string[]
   position_in_block_m: number
   route_position_m: number
   timeline: Array<{ start_time_s: number; state: CrossingState }>
@@ -57,6 +70,8 @@ export interface CrossoverViz {
   end_position_m: number
   from_track_id: string
   to_track_id: string
+  from_track_block_id: string
+  to_track_block_id: string
   route_start_m: number
   route_end_m: number
   route_mid_m: number
@@ -81,6 +96,7 @@ export interface StationPlatformViz {
   platform_id: string
   track_id: string
   block_id: string
+  track_block_id: string
   position_in_block_m: number
   length_m: number
   route_position_m: number
@@ -99,7 +115,14 @@ export interface TrainRunViz {
 }
 
 export interface SimulatorConfigViz {
-  route: { route_id: string; route_name: string; track_ids: string[]; total_length_m: number; blocks: TrackBlockViz[] }
+  route: {
+    route_id: string
+    route_name: string
+    track_ids: string[]
+    total_length_m: number
+    blocks: TrackBlockViz[]
+    track_blocks: OperationalTrackBlockViz[]
+  }
   signals: SignalViz[]
   dynamic_signalling: boolean
   stations: StationViz[]
@@ -183,6 +206,7 @@ export interface ActiveRestrictionConstraint {
   restriction_id: string
   block_id: string
   track_id: string | null
+  track_block_id?: string | null
   start_position_m: number
   end_position_m: number
   speed_limit_kmh: number
