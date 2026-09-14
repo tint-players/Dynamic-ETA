@@ -3,7 +3,7 @@ import type { ConstraintState, CrossingState, SignalAspect, SimulatorConfigViz, 
 
 interface Point { x: number; y: number }
 interface Pose extends Point { angleDeg: number }
-interface RangeDraft { kind: 'tsr' | 'maintenance'; block_id: string; start_position_m: number; end_position_m: number }
+interface RangeDraft { kind: 'tsr' | 'maintenance'; block_id: string; track_id: string; start_position_m: number; end_position_m: number }
 interface ManualSignalOverrideUi { signal_id: string; aspect: SignalAspect; start_sim_time_s: number; end_sim_time_s: number }
 
 type ConstraintTool = 'weather' | 'tsr' | 'maintenance' | 'signal'
@@ -185,7 +185,7 @@ function clampZoom(value: number): number { return Math.max(MIN_ZOOM, Math.min(M
 function snapHalf(value: number): number { return Math.round(value * 2) / 2 }
 function remaining(end: number | null, simTime: number): string { return end == null ? 'until reset' : `${Math.max(0, Math.ceil(end - simTime))}s left` }
 
-export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', rangeDraft = null, onRangeDraft, onRangeDraftChange, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {}, constraintState }: {
+export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', selectedRestrictionTrack = '', rangeDraft = null, onRangeDraft, onRangeDraftChange, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {}, constraintState }: {
   config: SimulatorConfigViz
   frames: TelemetryFrame[]
   signalStates: Record<string, SignalAspect>
@@ -194,6 +194,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
   onSelectTrain: (trainId: string) => void
   constraintsOpen?: boolean
   activeConstraintTool?: ConstraintTool
+  selectedRestrictionTrack?: string
   rangeDraft?: RangeDraft | null
   onRangeDraft?: (draft: RangeDraft) => void
   onRangeDraftChange?: (draft: RangeDraft | null) => void
@@ -224,7 +225,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
   }
 
   const chooseRange = (clientX: number) => {
-    if (!constraintsOpen || (activeConstraintTool !== 'tsr' && activeConstraintTool !== 'maintenance')) return
+    if (!constraintsOpen || !selectedRestrictionTrack || (activeConstraintTool !== 'tsr' && activeConstraintTool !== 'maintenance')) return
     const routeM = pointerRoutePosition(clientX)
     const block = config.route.blocks.find((item) => routeM >= item.route_start_m && routeM <= item.route_end_m) ?? config.route.blocks.at(-1)
     if (!block) return
@@ -236,7 +237,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
     if (end > block.length_m) { start -= end - block.length_m; end = block.length_m }
     start = Math.max(0, start)
     end = Math.min(block.length_m, end)
-    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, start_position_m: Math.round(start), end_position_m: Math.round(end) })
+    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, track_id: selectedRestrictionTrack, start_position_m: Math.round(start), end_position_m: Math.round(end) })
   }
 
   const dragRange = (clientX: number) => {
@@ -250,6 +251,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
   const activeTsr = config.environment.temporary_speed_restrictions.filter((item) => item.start_time_s <= simTime && (item.end_time_s == null || simTime < item.end_time_s))
   const activeMaintenance = config.environment.maintenance_restrictions.filter((item) => item.start_time_s <= simTime && (item.end_time_s == null || simTime < item.end_time_s))
+  const selectedRestrictionTrackIdx = selectedRestrictionTrack ? trackIndex(config, selectedRestrictionTrack) : 0
+  const restrictionTrackIndexes = (trackId: string | null) => trackId ? [trackIndex(config, trackId)] : config.route.track_ids.map((_, index) => index)
 
   return <section className={`panel route-panel realistic-route-panel route-focus ${constraintsOpen ? 'constraint-editing' : ''}`}>
     <div className="panel-heading route-panel-heading"><div><span className="eyebrow">Live railway network</span><h2>{config.route.route_name}</h2></div><div className="route-heading-tools"><div className="route-meta">{config.route.track_ids.length} tracks · {frames.length} trains · {config.stations.length} stations{constraintsOpen && <b className="edit-mode-pill">EDIT MODE</b>}</div><div className="route-zoom-controls"><button type="button" onClick={() => setZoom((value) => clampZoom(value - ZOOM_STEP))}>−</button><button type="button" onClick={fitRoute}>Fit</button><button type="button" onClick={() => setZoom((value) => clampZoom(value + ZOOM_STEP))}>+</button><button type="button" className="zoom-value" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button></div></div></div>
@@ -259,7 +262,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
       {config.route.track_ids.map((id, index) => <g key={id}><path d={fullTrackPath(config, index)} className="track-ballast-path" /><path d={fullTrackPath(config, index)} className="track-bed-path" /><path d={fullTrackPath(config, index)} className="track-sleeper-path" /><path d={fullTrackPath(config, index)} className="track-rail-path" /><text x={24} y={pointAt(config, 0, index).y + 4} className="track-name">{id}</text></g>)}
 
-      {constraintsOpen && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && config.route.track_ids.map((_, trackIdx) => blocks.map(({ block }) => <path key={`hit-${trackIdx}-${block.block_id}`} d={pathBetween(config, block.route_start_m, block.route_end_m, trackIdx)} className="constraint-hit-path" onClick={(event) => { event.stopPropagation(); chooseRange(event.clientX) }} />))}
+      {constraintsOpen && selectedRestrictionTrack && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && blocks.map(({ block }) => <path key={`hit-${selectedRestrictionTrack}-${block.block_id}`} d={pathBetween(config, block.route_start_m, block.route_end_m, selectedRestrictionTrackIdx)} className="constraint-hit-path" onClick={(event) => { event.stopPropagation(); chooseRange(event.clientX) }} />)}
 
       {config.crossovers.map((xover) => { const fromIdx = trackIndex(config, xover.from_track_id); const toIdx = trackIndex(config, xover.to_track_id); const a = pointAt(config, xover.route_start_m, fromIdx); const b = pointAt(config, xover.route_end_m, toIdx); return <g key={xover.crossover_id} className="svg-crossover"><path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} /><text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 12} textAnchor="middle">Single Crossover · {xover.crossover_id}</text></g> })}
 
@@ -276,14 +279,14 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
         const maintenance = activeMaintenance.filter((item) => item.block_id === block.block_id)
         const manualSignals = config.signals.filter((signal) => signal.protected_block_id === block.block_id && manualSignalOverrides[signal.signal_id])
         const weatherLine = manualWeather ? `${manualWeather.condition.replaceAll('_', ' ')} · ${manualWeather.visibility_m}m · ${remaining(manualWeather.end_time_s, simTime)}` : weather && weather.condition !== 'CLEAR' ? `${weather.condition.replaceAll('_', ' ')} · ${weather.visibility_m}m` : null
-        const lines = [weatherLine, ...tsrs.map((item) => `TSR ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...maintenance.map((item) => `MAINT ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...manualSignals.map((signal) => `MANUAL ${signal.signal_id} ${manualSignalOverrides[signal.signal_id].aspect} · ${remaining(manualSignalOverrides[signal.signal_id].end_sim_time_s, simTime)}`)].filter(Boolean) as string[]
+        const lines = [weatherLine, ...tsrs.map((item) => `TSR ${item.track_id ?? 'ALL'} ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...maintenance.map((item) => item.maintenance_type === 'FULL_CLOSURE' ? `MAINT ${item.track_id ?? 'ALL'} FULL CLOSURE · ${remaining(item.end_time_s, simTime)}` : `MAINT ${item.track_id ?? 'ALL'} ${item.speed_limit_kmh} · ${remaining(item.end_time_s, simTime)}`), ...manualSignals.map((signal) => `MANUAL ${signal.signal_id} ${manualSignalOverrides[signal.signal_id].aspect} · ${remaining(manualSignalOverrides[signal.signal_id].end_sim_time_s, simTime)}`)].filter(Boolean) as string[]
         return <g key={block.block_id} className="block-svg-label"><text x={p.x} y={labelY} textAnchor="middle">{block.block_id}</text><text x={p.x} y={labelY + 16} textAnchor="middle" className="curve-label">MAX {block.speed_limit_kmh} km/h</text>{lines.slice(0, 4).map((line, i) => <g key={line}><rect x={p.x - 105} y={p.y + 62 + i * 24} width="210" height="19" rx="7" className="block-constraint-bg" /><text x={p.x} y={p.y + 76 + i * 24} textAnchor="middle" className="block-constraint-text">{line}</text></g>)}</g>
       })}
 
-      {activeTsr.map((item) => config.route.track_ids.map((trackId, trackIdx) => <g key={`${item.restriction_id}-${trackId}`}><path d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line tsr-line" /><text x={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).x} y={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).y - 18} textAnchor="middle" className="restriction-track-label">TSR · {item.speed_limit_kmh} km/h · {remaining(item.end_time_s, simTime)}</text></g>))}
-      {activeMaintenance.map((item) => config.route.track_ids.map((trackId, trackIdx) => <g key={`${item.restriction_id}-${trackId}`}><path d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line maintenance-line" /><text x={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).x} y={pointAt(config, (item.route_start_m + item.route_end_m) / 2, trackIdx).y + 28} textAnchor="middle" className="restriction-track-label maintenance-label">MAINT · {item.speed_limit_kmh} km/h · {remaining(item.end_time_s, simTime)}</text></g>))}
+      {activeTsr.map((item) => restrictionTrackIndexes(item.track_id).map((trackIdx) => { const trackId = config.route.track_ids[trackIdx]; const mid = (item.route_start_m + item.route_end_m) / 2; const p = pointAt(config, mid, trackIdx); return <g key={`${item.restriction_id}-${trackId}`}><path d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line tsr-line" /><text x={p.x} y={p.y - 18} textAnchor="middle" className="restriction-track-label">TSR · {trackId} · {item.speed_limit_kmh} km/h · {remaining(item.end_time_s, simTime)}</text></g> }))}
+      {activeMaintenance.map((item) => restrictionTrackIndexes(item.track_id).map((trackIdx) => { const trackId = config.route.track_ids[trackIdx]; const mid = (item.route_start_m + item.route_end_m) / 2; const p = pointAt(config, mid, trackIdx); const detail = item.maintenance_type === 'FULL_CLOSURE' ? 'FULL CLOSURE' : `${item.speed_limit_kmh} km/h`; return <g key={`${item.restriction_id}-${trackId}`}><path d={pathBetween(config, item.route_start_m, item.route_end_m, trackIdx)} className="restriction-line maintenance-line" /><text x={p.x} y={p.y + 28} textAnchor="middle" className="restriction-track-label maintenance-label">MAINT · {trackId} · {detail} · {remaining(item.end_time_s, simTime)}</text></g> }))}
 
-      {rangeDraft && constraintsOpen && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && (() => { const block = config.route.blocks.find((item) => item.block_id === rangeDraft.block_id); if (!block) return null; const startRoute = block.route_start_m + rangeDraft.start_position_m; const endRoute = block.route_start_m + rangeDraft.end_position_m; return <g className={`range-preview ${rangeDraft.kind}`}>{config.route.track_ids.map((_, idx) => <path key={idx} d={pathBetween(config, startRoute, endRoute, idx)} className="range-preview-line" />)}{[startRoute, endRoute].map((routeM, index) => { const p = pointAt(config, routeM, 0); return <g key={index} className="range-handle" transform={`translate(${p.x} ${p.y})`} onPointerDown={(event) => { event.stopPropagation(); dragHandle.current = index === 0 ? 'start' : 'end'; (event.currentTarget as SVGGElement).setPointerCapture?.(event.pointerId) }}><circle r="13" /><line x1="0" y1="-22" x2="0" y2="22" /></g> })}</g> })()}
+      {rangeDraft && constraintsOpen && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && (() => { const block = config.route.blocks.find((item) => item.block_id === rangeDraft.block_id); if (!block) return null; const startRoute = block.route_start_m + rangeDraft.start_position_m; const endRoute = block.route_start_m + rangeDraft.end_position_m; const idx = trackIndex(config, rangeDraft.track_id); return <g className={`range-preview ${rangeDraft.kind}`}><path d={pathBetween(config, startRoute, endRoute, idx)} className="range-preview-line" />{[startRoute, endRoute].map((routeM, index) => { const p = pointAt(config, routeM, idx); return <g key={index} className="range-handle" transform={`translate(${p.x} ${p.y})`} onPointerDown={(event) => { event.stopPropagation(); dragHandle.current = index === 0 ? 'start' : 'end'; (event.currentTarget as SVGGElement).setPointerCapture?.(event.pointerId) }}><circle r="13" /><line x1="0" y1="-22" x2="0" y2="22" /></g> })}</g> })()}
 
       {config.signals.map((signal) => { const idx = trackIndex(config, signal.track_id); const p = poseAt(config, signal.route_position_m, idx); const aspect = signalStates[signal.signal_id] ?? signalFallback(config, signal.signal_id, simTime); const side = signal.direction === 'FORWARD' ? -1 : 1; const labelY = side * 47; const manual = manualSignalOverrides[signal.signal_id]; const selected = constraintsOpen && selectedSignalId === signal.signal_id; const routeLit = routeIndicatorLit(config, frames, signal.signal_id, aspect); return <g key={signal.signal_id} transform={`translate(${p.x} ${p.y}) rotate(${p.angleDeg})`} className={`svg-signal ${constraintsOpen ? 'clickable' : ''} ${selected ? 'selected-signal' : ''} ${manual ? 'manual-signal' : ''}`} onClick={(event) => { if (constraintsOpen) { event.stopPropagation(); onSignalSelect?.(signal.signal_id) } }}><line x1="0" y1="0" x2="0" y2={side * 28} /><circle cx="0" cy={side * 34} r="7" className={`svg-signal-light ${aspect.toLowerCase()}`} />{signal.signal_type === 'ROUTE_INDICATOR' && <circle cx="13" cy={side * 34} r="5" fill={routeLit ? '#f8fafc' : '#334155'} stroke="#e2e8f0" strokeWidth="1.5" />}{manual && <circle cx={signal.signal_type === 'ROUTE_INDICATOR' ? 25 : 13} cy={side * 34} r="6" className="manual-marker" />}<text x="0" y={labelY} textAnchor="middle" transform={`rotate(${-p.angleDeg} 0 ${labelY})`}>{signal.signal_id}{manual ? ` · MANUAL ${remaining(manual.end_sim_time_s, simTime)}` : ''}</text></g> })}
 
@@ -293,6 +296,6 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
       <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">DELHI SIDE</text><text x={RIGHT} y={HEIGHT - 16} textAnchor="end" className="endpoint-svg-label">AGRA SIDE</text>
     </svg></div>
-    <div className="legend"><span>dynamic signals = block occupancy</span><span>click track in edit mode = 200m draft</span><span>drag handles = resize range</span><span className="crossing-legend road-open-legend">● road open = train stop</span><span><i className="legend-swatch tsr-swatch" />TSR</span><span><i className="legend-swatch maintenance-swatch" />Maintenance</span></div>
+    <div className="legend"><span>dynamic signals = block occupancy</span><span>selected track only = restriction draft</span><span>drag handles = resize range</span><span className="crossing-legend road-open-legend">● road open = train stop</span><span><i className="legend-swatch tsr-swatch" />TSR</span><span><i className="legend-swatch maintenance-swatch" />Maintenance</span></div>
   </section>
 }
