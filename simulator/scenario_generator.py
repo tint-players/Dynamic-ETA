@@ -11,10 +11,13 @@ from .models import (
     BlockWeatherSchedule,
     CrossingState,
     CrossingTimelineEntry,
+    MaintenanceRestriction,
+    MaintenanceType,
     SignalAspect,
     SignalStateSchedule,
     SignalTimelineEntry,
     SimulationConfig,
+    TelemetryFrame,
     TemporarySpeedRestriction,
     WeatherCondition,
     WeatherTimelineEntry,
@@ -33,6 +36,25 @@ class ScenarioGeneratorConfig:
     tsr_probability: float = 0.20
     crossing_closure_probability: float = 0.30
     signal_restriction_probability: float = 0.20
+    maintenance_probability: float = 0.20
+    maintenance_full_closure_probability: float = 0.35
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedScenarioRun:
+    """One completed randomized run plus the exact config that produced it.
+
+    Keeping the per-run config is important for ML feature reconstruction:
+    randomized TSR/maintenance/weather state belongs to the scenario, so using
+    only the unchanged base config would silently produce the wrong graph
+    features during offline training.
+    """
+
+    run_id: str
+    scenario_id: str
+    random_seed: int
+    config: SimulationConfig
+    frames: tuple[TelemetryFrame, ...]
 
 
 class ScenarioGenerator:
@@ -148,6 +170,43 @@ class ScenarioGenerator:
             )
         ]
 
+    def _random_maintenance(self, config: SimulationConfig) -> None:
+        """Randomize track-specific maintenance without creating permanent deadlocks."""
+
+        if self._rng.random() >= self.gen_config.maintenance_probability:
+            config.environment.maintenance_restrictions = []
+            return
+
+        section = self._rng.choice(enumerate_track_blocks(config.route))
+        block = section.geometry
+        start = block.length_m * self._rng.uniform(0.10, 0.60)
+        end = min(block.length_m, start + block.length_m * self._rng.uniform(0.15, 0.35))
+        starts_at = self._rng.uniform(30.0, 480.0)
+        ends_at = starts_at + self._rng.uniform(45.0, 180.0)
+        full_closure = self._rng.random() < self.gen_config.maintenance_full_closure_probability
+        maintenance_type = (
+            MaintenanceType.FULL_CLOSURE
+            if full_closure
+            else MaintenanceType.SPEED_RESTRICTION
+        )
+        speed_limit = max(
+            20.0,
+            min(block.speed_limit_kmh - 5.0, block.speed_limit_kmh * self._rng.uniform(0.40, 0.70)),
+        )
+        config.environment.maintenance_restrictions = [
+            MaintenanceRestriction(
+                restriction_id="GEN-MAINT-001",
+                block_id=section.block_id,
+                track_id=section.track_id,
+                start_position_m=start,
+                end_position_m=end,
+                speed_limit_kmh=speed_limit,
+                start_time_s=starts_at,
+                end_time_s=ends_at,
+                maintenance_type=maintenance_type,
+            )
+        ]
+
     def _random_crossings(self, config: SimulationConfig) -> None:
         updated = []
         for crossing in config.environment.crossings:
@@ -198,12 +257,15 @@ class ScenarioGenerator:
 
         self._random_weather(config)
         self._random_tsr(config)
+        self._random_maintenance(config)
         self._random_crossings(config)
         self._random_signals(config)
         return validate_track_block_config(config)
 
-    def run(self) -> TrackAwareBatchExporter:
-        exporter = TrackAwareBatchExporter()
+    def generate_runs(self) -> tuple[GeneratedScenarioRun, ...]:
+        """Run scenarios and retain the exact randomized config for each run."""
+
+        generated: list[GeneratedScenarioRun] = []
         for i in range(self.gen_config.n_scenarios):
             scenario_id = f"scenario_{i:05d}"
             run_id = new_run_id()
@@ -219,5 +281,22 @@ class ScenarioGenerator:
                 if is_network
                 else label_completed_journey(frames)
             )
-            exporter.add(validate_labelled_training_frames(labelled))
+            validated = validate_labelled_training_frames(labelled)
+            generated.append(
+                GeneratedScenarioRun(
+                    run_id=run_id,
+                    scenario_id=scenario_id,
+                    random_seed=self.random_seed,
+                    config=config,
+                    frames=tuple(validated),
+                )
+            )
+        return tuple(generated)
+
+    def run(self) -> TrackAwareBatchExporter:
+        """Backward-compatible batch export built from the richer generated runs."""
+
+        exporter = TrackAwareBatchExporter()
+        for generated_run in self.generate_runs():
+            exporter.add(list(generated_run.frames))
         return exporter
