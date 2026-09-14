@@ -38,7 +38,7 @@ The following post-run values are forbidden from inference-time model inputs:
 - `actual_arrival_simulation_s`
 - `total_journey_time_s`
 
-The shared feature builder intentionally does not expose a target field. Label attachment belongs to the later training-sample layer, so the same feature code can be reused for offline training and live inference without a second implementation.
+The shared feature builder intentionally does not expose a target field. Label attachment belongs to the training-sample layer, so the same feature code is reused for offline training and live inference without a second implementation.
 
 ## Shared feature builder
 
@@ -108,15 +108,38 @@ The builder also provides a leakage-safe `route_mask(train_id)`. The mask is der
 
 The context vector contains normalized train capabilities (maximum speed, length, acceleration, service/emergency deceleration), current direction, active/station flags, and current track index. `current_node_index` is returned separately and points directly into the canonical node ordering.
 
+## Per-second sample builder
+
+`simulator.ml_samples.MLSampleBuilder` is the boundary between simulator state and the eventual PyTorch dataset/model code.
+
+`build_inputs()` is the live-safe path. It packages the exact feature tensors and topology needed for one ETA prediction second and cannot access a target label:
+
+```text
+MLModelInputs
+  x_seq                   [60, F_sequence]
+  x_graph                 [N_track_blocks, F_node]
+  edge_index              [2, E_message]
+  operational_edge_index  [2, E_operational]
+  operational_edge_types
+  current_node_index
+  route_mask              [N_track_blocks]
+  x_context               [F_context]
+  node_ids
+```
+
+`build_training_sample()` is offline-only. It first builds the same `MLModelInputs`, then attaches `y = actual_remaining_time_s` plus `run_id`, `scenario_id`, `random_seed`, `train_id`, and `sim_time_s`. Missing provenance or a missing/negative target is rejected.
+
+Both paths also have record adapters for exported Parquet/dataframe-style dictionaries. Tests require record-based and live-frame inference inputs to be exactly equal. Therefore future training and live serving code consume the same model-input contract rather than maintaining separate preprocessing implementations.
+
 ## Dataset splitting
 
 Rows must never be randomly split independently. All rows sharing a `run_id` belong to exactly one of train, validation, or test. This prevents adjacent one-second observations from the same simulated trajectory from leaking across splits.
 
 A later checkpoint will implement the split utility; the required grouping key is fixed here as `run_id`.
 
-## Planned model sample
+## Current model sample
 
-For each eligible prediction second, the later sample builder will emit:
+For each eligible prediction second the sample layer now provides:
 
 ```text
 X_seq                   [60, F_sequence]
@@ -126,9 +149,7 @@ operational_edge_index  [2, E_operational]
 current_node_index      scalar
 route_mask              [N_track_blocks]
 X_context               [F_context]
-y                       actual_remaining_time_s
+y                       actual_remaining_time_s  # offline training only
 ```
-
-Checkpoint 2 provides `X_seq`, `X_graph`, `X_context`, canonical `node_ids`, and `current_node_index`. Checkpoint 3 provides the stable graph topology, directed operational edges, GraphSAGE message-passing edges, and leakage-safe route masks. The next sample-builder checkpoint will package these pieces together per prediction second and attach `y` only in the offline training path.
 
 For the current Delhi–Agra corridor, `N_track_blocks = 16`. The same contract is intended to support larger future networks without changing the identity semantics.
