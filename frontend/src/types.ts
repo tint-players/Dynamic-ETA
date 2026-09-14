@@ -3,6 +3,7 @@ export type SignalType = 'STANDARD' | 'ROUTE_INDICATOR'
 export type WeatherCondition = 'CLEAR' | 'RAIN' | 'HEAVY_RAIN' | 'FOG' | 'HEAVY_FOG'
 export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
 export type TrainDirection = 'FORWARD' | 'REVERSE'
+export type MaintenanceType = 'SPEED_RESTRICTION' | 'FULL_CLOSURE'
 
 export interface TrackBlockViz {
   block_id: string
@@ -35,6 +36,7 @@ export interface RestrictionViz {
   speed_limit_kmh: number
   start_time_s: number
   end_time_s: number | null
+  maintenance_type?: MaintenanceType
   route_start_m: number
   route_end_m: number
 }
@@ -184,6 +186,7 @@ export interface ActiveRestrictionConstraint {
   speed_limit_kmh: number
   start_time_s: number
   end_time_s: number | null
+  maintenance_type?: MaintenanceType
 }
 
 export interface ActiveSignalConstraint {
@@ -222,11 +225,20 @@ export type ManualInjectionRequest =
       signal_id: string
     }
   | {
-      command: 'inject_tsr' | 'inject_maintenance'
+      command: 'inject_tsr'
       block_id: string
       start_position_m: number
       end_position_m: number
       speed_limit_kmh: number
+      duration_s: number | null
+    }
+  | {
+      command: 'inject_maintenance'
+      block_id: string
+      start_position_m: number
+      end_position_m: number
+      speed_limit_kmh: number
+      maintenance_type: MaintenanceType
       duration_s: number | null
     }
 
