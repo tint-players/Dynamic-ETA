@@ -57,9 +57,10 @@ from .ml_baselines import (
     EffectiveCeilingETABaseline,
     ETAErrorBucket,
     ETAMetrics,
+    eta_metrics_from_predictions,
     evaluate_eta_predictor,
 )
-from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
+from .scenario_generator import GeneratedScenarioRun, ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
 __all__ = [
@@ -115,7 +116,9 @@ __all__ = [
     "EffectiveCeilingETABaseline",
     "ETAErrorBucket",
     "ETAMetrics",
+    "eta_metrics_from_predictions",
     "evaluate_eta_predictor",
+    "GeneratedScenarioRun",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
