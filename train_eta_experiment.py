@@ -25,6 +25,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=4)
+    parser.add_argument("--lstm-hidden-size", type=int, default=128)
+    parser.add_argument("--lstm-layers", type=int, default=2)
+    parser.add_argument("--gnn-hidden-size", type=int, default=128)
+    parser.add_argument("--gnn-layers", type=int, default=3)
+    parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--device", default=None, help="torch device, e.g. cpu, cuda, cuda:0")
     parser.add_argument("--checkpoint", default="artifacts/eta_winner.pt")
     parser.add_argument("--summary", default="artifacts/eta_experiment_summary.json")
@@ -50,6 +55,11 @@ def main() -> None:
         split_seed=args.split_seed,
         training_seed=args.training_seed,
         early_stopping_patience=args.patience,
+        lstm_hidden_size=args.lstm_hidden_size,
+        lstm_layers=args.lstm_layers,
+        gnn_hidden_size=args.gnn_hidden_size,
+        gnn_layers=args.gnn_layers,
+        dropout=args.dropout,
         device=args.device,
     )
     result = run_eta_experiment(runs, experiment=experiment_config)
