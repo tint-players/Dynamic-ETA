@@ -191,6 +191,10 @@ class MultiTrainSimulationEngine:
     def _current_location(self, train: _RuntimeTrain):
         return self.config.route.locate(train.route_position_m)
 
+    @staticmethod
+    def _restriction_on_track(restriction, track_id: str) -> bool:
+        return restriction.track_id is None or restriction.track_id == track_id
+
     def _current_ceiling(self, train: _RuntimeTrain) -> tuple[float, WeatherCondition, float]:
         _, block, local = self._current_location(train)
         weather, visibility = self.env.weather(block.block_id, self.sim_time_s)
@@ -200,7 +204,8 @@ class MultiTrainSimulationEngine:
         ceiling *= weather_speed_factor(weather, visibility)
         for restriction in [*self.config.environment.temporary_speed_restrictions, *self.config.environment.maintenance_restrictions]:
             if (
-                restriction.block_id == block.block_id
+                self._restriction_on_track(restriction, train.train.track_id)
+                and restriction.block_id == block.block_id
                 and restriction.start_position_m <= local < restriction.end_position_m
                 and self.env.restriction_active(restriction, self.sim_time_s)
             ):
@@ -416,7 +421,10 @@ class MultiTrainSimulationEngine:
 
         next_tsr = None
         for restriction in self.config.environment.temporary_speed_restrictions:
-            if not self.env.restriction_active(restriction, self.sim_time_s):
+            if (
+                not self._restriction_on_track(restriction, train.train.track_id)
+                or not self.env.restriction_active(restriction, self.sim_time_s)
+            ):
                 continue
             block_start = self.config.route.block_start_distance_m(restriction.block_id)
             target = block_start + (restriction.start_position_m if train.sign > 0 else restriction.end_position_m)
