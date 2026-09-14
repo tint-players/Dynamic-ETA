@@ -236,6 +236,8 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         for restriction in self.config.environment.maintenance_restrictions:
             if restriction.maintenance_type != MaintenanceType.FULL_CLOSURE:
                 continue
+            if not self._restriction_on_track(restriction, train.current_track_id):
+                continue
             if not self._restriction_active(restriction):
                 continue
 
