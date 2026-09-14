@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import { connectSimulation, createSession, sendCommand, sendInjection } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
-import type { ConstraintState, CrossingState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
-import { EMPTY_CONSTRAINT_STATE } from './types'
+import type { ConstraintState, CrossingState, ETAState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
+import { EMPTY_CONSTRAINT_STATE, EMPTY_ETA_STATE } from './types'
 
 const initialPlayback: PlaybackState = { playing: false, playback_speed: 1, complete: false }
 
@@ -19,6 +19,14 @@ function trainEvents(previous: TelemetryFrame | undefined, current: TelemetryFra
   return events
 }
 
+function formatEta(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return '—'
+  const rounded = Math.max(0, Math.round(seconds))
+  const minutes = Math.floor(rounded / 60)
+  const remainder = rounded % 60
+  return `${minutes}:${remainder.toString().padStart(2, '0')}`
+}
+
 export default function App() {
   const [session, setSession] = useState<SessionCreateResponse | null>(null)
   const [frames, setFrames] = useState<TelemetryFrame[]>([])
@@ -28,6 +36,7 @@ export default function App() {
   const [signalStates, setSignalStates] = useState<Record<string, SignalAspect>>({})
   const [crossingStates, setCrossingStates] = useState<Record<string, CrossingState>>({})
   const [constraintState, setConstraintState] = useState<ConstraintState>(EMPTY_CONSTRAINT_STATE)
+  const [etaState, setEtaState] = useState<ETAState>(EMPTY_ETA_STATE)
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
   const [exportPaths, setExportPaths] = useState<ExportPaths | null>(null)
   const [connection, setConnection] = useState('connecting')
@@ -46,6 +55,7 @@ export default function App() {
         setSignalStates(created.signal_states)
         setCrossingStates(created.crossing_states)
         setConstraintState(created.constraint_state ?? EMPTY_CONSTRAINT_STATE)
+        setEtaState(created.eta_state ?? EMPTY_ETA_STATE)
         const initialSelected = created.config.train.train_id
         setSelectedTrainId(initialSelected)
         setHistoryByTrain(Object.fromEntries(created.initial_frames.map((f) => [f.train_id, [f]])))
@@ -61,6 +71,7 @@ export default function App() {
               setFrames(nextFrames)
               setSignalStates(message.signal_states)
               setCrossingStates(message.crossing_states)
+              setEtaState(message.eta_state ?? EMPTY_ETA_STATE)
               if (isReset) {
                 setHistoryByTrain(Object.fromEntries(nextFrames.map((f) => [f.train_id, [f]])))
                 setEvents([{ id: 'reset-0', time: 0, text: 'Simulation reset to clean baseline' }])
@@ -113,9 +124,15 @@ export default function App() {
 
   const selectedFrame = frames.find((f) => f.train_id === selectedTrainId) ?? frames[0]
   const selectedHistory = historyByTrain[selectedFrame.train_id] ?? [selectedFrame]
+  const selectedEta = etaState.predictions[selectedFrame.train_id]
   return (
     <>
       {error && <div className="error-toast" onClick={() => setError(null)}>{error}</div>}
+      <div style={{ margin: '12px 18px 0', padding: '10px 14px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 10, display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap', background: 'rgba(15,23,42,.72)' }}>
+        <strong>Live ML ETA</strong>
+        <span>{selectedFrame.train_id}: <b>{selectedEta ? `${formatEta(selectedEta.remaining_time_s)} remaining` : selectedFrame.completed ? 'arrived' : selectedFrame.active ? 'prediction unavailable' : 'not departed'}</b></span>
+        <span style={{ opacity: .72 }}>{etaState.available ? `model: ${etaState.model_name ?? 'unknown'}` : `ML unavailable${etaState.message ? ` · ${etaState.message}` : ''}`}</span>
+      </div>
       <Dashboard
         config={session.config}
         frame={selectedFrame}
