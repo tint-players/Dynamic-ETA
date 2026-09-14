@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .exporters import BlockVisitExporter, ParquetTelemetryExporter
+from .exporters import BatchExporter, BlockVisitExporter, ParquetTelemetryExporter
 from .models import TelemetryFrame
 from .track_blocks import track_block_id
+
+
+class TrackAwareBatchExporter(BatchExporter):
+    """Raw multi-scenario exporter that preserves canonical track-block identity."""
+
+    def add(self, frames: list[TelemetryFrame]) -> None:
+        for frame in frames:
+            row = frame.model_dump(mode="json")
+            row["track_block_id"] = track_block_id(frame.track_id, frame.current_block_id)
+            self._rows.append(row)
 
 
 class TrackAwareParquetTelemetryExporter(ParquetTelemetryExporter):
