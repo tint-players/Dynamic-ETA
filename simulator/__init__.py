@@ -48,6 +48,7 @@ from .ml_graph import (
     MLGraphTopology,
     MLGraphTopologyBuilder,
 )
+from .ml_samples import MLModelInputs, MLTrainingSample, MLSampleBuilder
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -92,6 +93,9 @@ __all__ = [
     "CROSSOVER_EDGE",
     "MLGraphTopology",
     "MLGraphTopologyBuilder",
+    "MLModelInputs",
+    "MLTrainingSample",
+    "MLSampleBuilder",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
