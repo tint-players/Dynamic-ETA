@@ -79,6 +79,31 @@ Signal *presence* is included as a static node attribute. A global per-node dyna
 
 Similarly, crossing presence is a graph attribute while the target train's currently observable next-crossing state remains in the sequence. Dynamic V4 crossing phases are engine runtime state and should be exported explicitly before becoming a global node feature.
 
+### Graph topology
+
+`simulator.ml_graph.MLGraphTopologyBuilder` is the canonical topology source. It uses the exact same canonical track-block node order as the feature builder.
+
+The operational graph preserves railway travel direction. For the current Delhi–Agra corridor it is:
+
+```text
+UP-BLK-01 -> UP-BLK-02 -> ... -> UP-BLK-08
+
+DOWN-BLK-08 -> DOWN-BLK-07 -> ... -> DOWN-BLK-01
+
+UP-BLK-07 -> DOWN-BLK-07   (XOVER-AGRA-01)
+```
+
+This gives 14 route-successor edges plus one directed crossover edge. Track direction is taken from the configured directional signals; a track with ambiguous signalling is rejected rather than silently assigned the wrong direction.
+
+The topology exposes two edge views:
+
+- `operational_edge_index`: authoritative directed railway movement edges, with `ROUTE_SUCCESSOR` or `CROSSOVER` edge type metadata;
+- `edge_index`: a symmetric message-passing view containing both orientations of each operational edge, intended for the initial GraphSAGE encoder.
+
+Keeping both views means the model can aggregate context from both neighbours without losing the true directed railway topology.
+
+The builder also provides a leakage-safe `route_mask(train_id)`. The mask is derived only from configuration: the source-to-destination block span on the train's starting track plus both endpoints of any explicitly configured crossover. It does not inspect future runtime outcomes or arrival labels.
+
 ### Context features
 
 The context vector contains normalized train capabilities (maximum speed, length, acceleration, service/emergency deceleration), current direction, active/station flags, and current track index. `current_node_index` is returned separately and points directly into the canonical node ordering.
@@ -94,15 +119,16 @@ A later checkpoint will implement the split utility; the required grouping key i
 For each eligible prediction second, the later sample builder will emit:
 
 ```text
-X_seq              [60, F_sequence]
-X_graph            [N_track_blocks, F_node]
-edge_index         [2, E]
-current_node_index scalar
-route_mask         [N_track_blocks]
-X_context          [F_context]
-y                  actual_remaining_time_s
+X_seq                   [60, F_sequence]
+X_graph                 [N_track_blocks, F_node]
+edge_index              [2, E_message]
+operational_edge_index  [2, E_operational]
+current_node_index      scalar
+route_mask              [N_track_blocks]
+X_context               [F_context]
+y                       actual_remaining_time_s
 ```
 
-Checkpoint 2 now provides `X_seq`, `X_graph`, `X_context`, the canonical `node_ids`, and `current_node_index`. Graph edges and route masks belong to the next graph/sample checkpoints.
+Checkpoint 2 provides `X_seq`, `X_graph`, `X_context`, canonical `node_ids`, and `current_node_index`. Checkpoint 3 provides the stable graph topology, directed operational edges, GraphSAGE message-passing edges, and leakage-safe route masks. The next sample-builder checkpoint will package these pieces together per prediction second and attach `y` only in the offline training path.
 
 For the current Delhi–Agra corridor, `N_track_blocks = 16`. The same contract is intended to support larger future networks without changing the identity semantics.
