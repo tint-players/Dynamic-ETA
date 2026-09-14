@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 from statistics import median
-from typing import Iterable, Protocol
+from typing import Iterable, Protocol, Sequence
 
 from .ml_features import SEQUENCE_FEATURE_NAMES, SPEED_SCALE_KMH
 from .ml_samples import MLModelInputs, MLTrainingSample
@@ -135,17 +135,19 @@ def _error_summary(name: str, errors: list[float]) -> ETAErrorBucket:
     )
 
 
-def evaluate_eta_predictor(
-    predictor: ETAPredictor,
-    samples: Iterable[MLTrainingSample],
+def eta_metrics_from_predictions(
+    predictions_s: Sequence[float],
+    targets_s: Sequence[float],
 ) -> ETAMetrics:
-    """Evaluate a predictor with global and remaining-ETA bucketed errors.
+    """Compute the common ETA metrics from already-materialized predictions.
 
-    Buckets use ground-truth remaining time only for evaluation, never as a
-    model input: 0-5 min, 5-15 min, 15-30 min, and 30+ min.
+    This is shared by simple predictors and batched neural evaluation so large
+    experiments do not have to perform one PyTorch forward pass per sample.
     """
 
-    materialized = list(samples)
+    if len(predictions_s) != len(targets_s):
+        raise ValueError("predictions_s and targets_s must have equal length")
+
     errors: list[float] = []
     bucket_errors: dict[str, list[float]] = {
         "0-5min": [],
@@ -154,17 +156,20 @@ def evaluate_eta_predictor(
         "30min+": [],
     }
 
-    for sample in materialized:
-        prediction = float(predictor.predict_seconds(sample.inputs))
+    for prediction, target in zip(predictions_s, targets_s):
+        prediction = float(prediction)
+        target = float(target)
         if not isfinite(prediction) or prediction < 0:
             raise ValueError("ETA predictor must return a finite non-negative number of seconds")
-        error = abs(prediction - sample.y)
+        if not isfinite(target) or target < 0:
+            raise ValueError("ETA target must be a finite non-negative number of seconds")
+        error = abs(prediction - target)
         errors.append(error)
-        if sample.y < 5 * 60:
+        if target < 5 * 60:
             bucket_errors["0-5min"].append(error)
-        elif sample.y < 15 * 60:
+        elif target < 15 * 60:
             bucket_errors["5-15min"].append(error)
-        elif sample.y < 30 * 60:
+        elif target < 30 * 60:
             bucket_errors["15-30min"].append(error)
         else:
             bucket_errors["30min+"].append(error)
@@ -185,3 +190,19 @@ def evaluate_eta_predictor(
         p90_absolute_error_s=_percentile(errors, 0.90),
         buckets=tuple(_error_summary(name, bucket_errors[name]) for name in bucket_errors),
     )
+
+
+def evaluate_eta_predictor(
+    predictor: ETAPredictor,
+    samples: Iterable[MLTrainingSample],
+) -> ETAMetrics:
+    """Evaluate a predictor with global and remaining-ETA bucketed errors.
+
+    Buckets use ground-truth remaining time only for evaluation, never as a
+    model input: 0-5 min, 5-15 min, 15-30 min, and 30+ min.
+    """
+
+    materialized = list(samples)
+    predictions = [float(predictor.predict_seconds(sample.inputs)) for sample in materialized]
+    targets = [float(sample.y) for sample in materialized]
+    return eta_metrics_from_predictions(predictions, targets)
