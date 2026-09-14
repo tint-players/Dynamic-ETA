@@ -50,6 +50,15 @@ from .ml_graph import (
 )
 from .ml_samples import MLModelInputs, MLTrainingSample, MLSampleBuilder
 from .ml_dataset import MLDatasetSplit, MLTrainingDatasetBuilder, split_training_samples_by_run
+from .ml_baselines import (
+    ETAPredictor,
+    CurrentSpeedETABaseline,
+    HistoricalMeanSpeedETABaseline,
+    EffectiveCeilingETABaseline,
+    ETAErrorBucket,
+    ETAMetrics,
+    evaluate_eta_predictor,
+)
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -100,6 +109,13 @@ __all__ = [
     "MLDatasetSplit",
     "MLTrainingDatasetBuilder",
     "split_training_samples_by_run",
+    "ETAPredictor",
+    "CurrentSpeedETABaseline",
+    "HistoricalMeanSpeedETABaseline",
+    "EffectiveCeilingETABaseline",
+    "ETAErrorBucket",
+    "ETAMetrics",
+    "evaluate_eta_predictor",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
