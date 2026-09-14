@@ -55,6 +55,7 @@ class SignalResetCommand(BaseModel):
 class SpeedRestrictionInjectionCommand(BaseModel):
     command: Literal["inject_tsr", "inject_maintenance"]
     block_id: str
+    track_id: str
     start_position_m: float = Field(ge=0)
     end_position_m: float = Field(gt=0)
     speed_limit_kmh: float = Field(gt=0)
@@ -187,6 +188,7 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
             message = session.inject_speed_restriction(
                 kind=kind,
                 block_id=command.block_id,
+                track_id=command.track_id,
                 start_position_m=command.start_position_m,
                 end_position_m=command.end_position_m,
                 speed_limit_kmh=command.speed_limit_kmh,
