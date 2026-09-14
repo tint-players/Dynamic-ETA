@@ -42,6 +42,12 @@ from .ml_features import (
     MLFeatureBatch,
     MLFeatureBuilder,
 )
+from .ml_graph import (
+    CROSSOVER_EDGE,
+    ROUTE_SUCCESSOR_EDGE,
+    MLGraphTopology,
+    MLGraphTopologyBuilder,
+)
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -82,6 +88,10 @@ __all__ = [
     "CONTEXT_FEATURE_NAMES",
     "MLFeatureBatch",
     "MLFeatureBuilder",
+    "ROUTE_SUCCESSOR_EDGE",
+    "CROSSOVER_EDGE",
+    "MLGraphTopology",
+    "MLGraphTopologyBuilder",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
