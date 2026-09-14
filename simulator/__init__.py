@@ -59,6 +59,18 @@ from .ml_baselines import (
     ETAMetrics,
     evaluate_eta_predictor,
 )
+from .ml_lstm import (
+    DEFAULT_HUBER_DELTA_S,
+    DEFAULT_LSTM_HIDDEN_SIZE,
+    DEFAULT_LSTM_LAYERS,
+    TorchLSTMBatch,
+    LSTMETARegressor,
+    TorchLSTMETAPredictor,
+    collate_lstm_training_samples,
+    huber_eta_loss,
+    train_lstm_epoch,
+    evaluate_lstm_model,
+)
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -116,6 +128,16 @@ __all__ = [
     "ETAErrorBucket",
     "ETAMetrics",
     "evaluate_eta_predictor",
+    "DEFAULT_HUBER_DELTA_S",
+    "DEFAULT_LSTM_HIDDEN_SIZE",
+    "DEFAULT_LSTM_LAYERS",
+    "TorchLSTMBatch",
+    "LSTMETARegressor",
+    "TorchLSTMETAPredictor",
+    "collate_lstm_training_samples",
+    "huber_eta_loss",
+    "train_lstm_epoch",
+    "evaluate_lstm_model",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
