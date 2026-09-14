@@ -9,8 +9,10 @@ from uuid import uuid4
 from simulator.config_loader import load_simulation_config
 from simulator.dataset import label_completed_journey, label_completed_multi_train_journey
 from simulator.engine import SimulationEngine
-from simulator.exporters import BlockVisitExporter
-from simulator.track_aware_exporters import TrackAwareParquetTelemetryExporter as ParquetTelemetryExporter
+from simulator.track_aware_exporters import (
+    TrackAwareParquetTelemetryExporter as ParquetTelemetryExporter,
+    TrackBlockVisitExporter as BlockVisitExporter,
+)
 from simulator.models import (
     BlockWeatherSchedule,
     MaintenanceRestriction,
@@ -24,6 +26,7 @@ from simulator.models import (
 )
 from simulator.network_engine_v4 import NetworkSimulationEngineV4
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
+from simulator.track_blocks import get_track_block, track_block_id
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
@@ -39,7 +42,12 @@ def _display_path(path: Path) -> str:
 
 
 def _new_engine(config: SimulationConfig, scenario_id: str):
-    if config.additional_train_runs or config.stations or config.dynamic_signalling:
+    if (
+        len(config.route.track_ids) > 1
+        or config.additional_train_runs
+        or config.stations
+        or config.dynamic_signalling
+    ):
         return NetworkSimulationEngineV4Restrictive(config, scenario_id=scenario_id)
     return SimulationEngine(config, scenario_id=scenario_id)
 
@@ -161,8 +169,10 @@ class SimulationSession:
         block = self._block(block_id)
         if block is None:
             raise ValueError(f"Unknown block_id: {block_id}")
-        if track_id is not None and track_id not in self.config.route.track_ids:
-            raise ValueError(f"Unknown track_id: {track_id}")
+        if len(self.config.route.track_ids) > 1 and track_id is None:
+            raise ValueError("track_id is required for restrictions on a multi-track route")
+        if track_id is not None:
+            get_track_block(self.config.route, track_id, block_id)
         if start_position_m < 0 or end_position_m > block.length_m:
             raise ValueError(f"Restriction range must stay within {block_id} (0-{block.length_m:g}m)")
 
@@ -208,6 +218,13 @@ class SimulationSession:
             f"{start_position_m:g}-{end_position_m:g}m{speed_text} {duration_text}"
         )
 
+    @staticmethod
+    def _restriction_state_payload(restriction) -> dict[str, Any]:
+        payload = restriction.model_dump(mode="json")
+        if restriction.track_id is not None:
+            payload["track_block_id"] = track_block_id(restriction.track_id, restriction.block_id)
+        return payload
+
     def active_constraints(self) -> dict[str, Any]:
         sim_time_s = self.engine.sim_time_s
         expired_weather = [
@@ -220,14 +237,14 @@ class SimulationSession:
 
         weather = [dict(item) for item in self.manual_weather_overrides.values()]
         tsr = [
-            restriction.model_dump(mode="json")
+            self._restriction_state_payload(restriction)
             for restriction in self.config.environment.temporary_speed_restrictions
             if restriction.restriction_id.startswith("TSR-MANUAL-")
             and restriction.start_time_s <= sim_time_s
             and (restriction.end_time_s is None or sim_time_s < restriction.end_time_s)
         ]
         maintenance = [
-            restriction.model_dump(mode="json")
+            self._restriction_state_payload(restriction)
             for restriction in self.config.environment.maintenance_restrictions
             if restriction.restriction_id.startswith("MAINT-MANUAL-")
             and restriction.start_time_s <= sim_time_s
