@@ -157,6 +157,30 @@ All samples with the same `run_id` are guaranteed to remain in exactly one parti
 
 The split object records both the samples and the exact `run_id` membership for train, validation, and test, making leakage audits straightforward.
 
+## Model benchmarks
+
+The model stack is built as explicit ablations so each added source of information has to earn its complexity.
+
+The LSTM-only benchmark consumes `x_seq + x_context`. Its default encoder is a two-layer LSTM with hidden size 128 and a non-negative ETA regression head.
+
+The graph-only benchmark in `simulator.ml_gnn` consumes `x_graph + edge_index + current_node_index + route_mask + x_context`. The default graph encoder is three mean-aggregation GraphSAGE layers with hidden size 128. It produces one embedding per canonical track-block. The ETA head combines the embedding of the train's current track-block, a masked mean embedding over the train's configured route, and train context, then uses `Softplus` to keep ETA non-negative.
+
+`edge_index` is used for GraphSAGE message passing. `operational_edge_index` and edge-type metadata remain outside this first graph benchmark so true directed railway semantics are preserved for later directional/relational GNN experiments without changing the data contract.
+
+The intended evaluation ladder is therefore:
+
+```text
+naive ETA baselines
+        ↓
+LSTM-only
+        ↓
+GraphSAGE-only
+        ↓
+LSTM + GraphSAGE hybrid
+```
+
+All neural benchmarks use the same post-run `actual_remaining_time_s` target and Huber regression loss, and they are evaluated only on run-level validation/test partitions.
+
 ## Current model sample
 
 For each eligible prediction second the sample layer now provides:
