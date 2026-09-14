@@ -40,6 +40,7 @@ class ETAExperimentConfig:
     train_ratio: float = 0.70
     validation_ratio: float = 0.15
     test_ratio: float = 0.15
+    sample_every_n_steps: int = 1
     lstm_hidden_size: int = 128
     lstm_layers: int = 2
     gnn_hidden_size: int = 128
@@ -62,6 +63,8 @@ class ETAExperimentConfig:
             raise ValueError("min_validation_improvement_s cannot be negative")
         if min(self.train_ratio, self.validation_ratio, self.test_ratio) < 0:
             raise ValueError("split ratios cannot be negative")
+        if self.sample_every_n_steps <= 0:
+            raise ValueError("sample_every_n_steps must be positive")
         if self.lstm_hidden_size <= 0 or self.lstm_layers <= 0:
             raise ValueError("LSTM dimensions must be positive")
         if self.gnn_hidden_size <= 0 or self.gnn_layers <= 0:
@@ -100,9 +103,15 @@ class _TrainedCandidate:
     model_kwargs: dict[str, object]
 
 
-def build_experiment_samples(runs: Iterable[GeneratedScenarioRun]) -> tuple[MLTrainingSample, ...]:
+def build_experiment_samples(
+    runs: Iterable[GeneratedScenarioRun],
+    *,
+    sample_every_n_steps: int = 1,
+) -> tuple[MLTrainingSample, ...]:
     """Build samples with each run's exact randomized scenario config."""
 
+    if sample_every_n_steps <= 0:
+        raise ValueError("sample_every_n_steps must be positive")
     materialized = list(runs)
     if not materialized:
         raise ValueError("At least one generated run is required")
@@ -116,7 +125,10 @@ def build_experiment_samples(runs: Iterable[GeneratedScenarioRun]) -> tuple[MLTr
         if generated_run.run_id in seen_run_ids:
             raise ValueError(f"Duplicate generated run_id: {generated_run.run_id}")
         seen_run_ids.add(generated_run.run_id)
-        run_samples = MLTrainingDatasetBuilder(generated_run.config).build_run_samples(generated_run.frames)
+        run_samples = MLTrainingDatasetBuilder(generated_run.config).build_run_samples(
+            generated_run.frames,
+            sample_every_n_steps=sample_every_n_steps,
+        )
         if not run_samples:
             raise ValueError(f"Generated run {generated_run.run_id} produced no ML samples")
 
@@ -297,7 +309,10 @@ def run_eta_experiment(
     if len(materialized_runs) < 3:
         raise ValueError("At least three runs are required for train/validation/test experimentation")
 
-    samples = build_experiment_samples(materialized_runs)
+    samples = build_experiment_samples(
+        materialized_runs,
+        sample_every_n_steps=experiment.sample_every_n_steps,
+    )
     split = split_training_samples_by_run(
         samples,
         train_ratio=experiment.train_ratio,
