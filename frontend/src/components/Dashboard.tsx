@@ -126,7 +126,7 @@ function SpeedChart({ history }: { history: TelemetryFrame[] }) {
 }
 
 function EventLog({ events }: { events: DebugEvent[] }) {
-  return <section className="panel event-panel"><div className="panel-heading"><h2>Event log</h2><span>{events.length} events</span></div><div className="event-list">{[...events].reverse().map((event) => <div className="event-row" key={event.id}><time>{event.time.toFixed(0)}s</time><span>{event.text}</span></div>)}</section>
+  return <section className="panel event-panel"><div className="panel-heading"><h2>Event log</h2><span>{events.length} events</span></div><div className="event-list">{[...events].reverse().map((event) => <div className="event-row" key={event.id}><time>{event.time.toFixed(0)}s</time><span>{event.text}</span></div>)}</div></section>
 }
 
 export default function Dashboard(props: DashboardProps) {
