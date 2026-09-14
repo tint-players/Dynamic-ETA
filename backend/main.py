@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field
 
 from simulator.models import MaintenanceType, SignalAspect, WeatherCondition
 
+from .live_eta import live_eta_state
 from .session import SimulationSession, sessions
 from .viz import config_for_visualization
 
 
-app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.5.0")
+app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -74,11 +75,13 @@ def _session_or_404(session_id: str) -> SimulationSession:
 
 
 def _telemetry_message(session: SimulationSession, frames) -> dict:
+    materialized = list(frames)
     return {
         "type": "telemetry_batch",
-        "frames": [frame.model_dump(mode="json") for frame in frames],
+        "frames": [frame.model_dump(mode="json") for frame in materialized],
         "signal_states": session.signal_states(),
         "crossing_states": session.crossing_states(),
+        "eta_state": live_eta_state(session, materialized),
     }
 
 
@@ -123,6 +126,7 @@ def create_session(request: CreateSessionRequest) -> dict:
         "signal_states": session.signal_states(),
         "crossing_states": session.crossing_states(),
         "constraint_state": session.active_constraints(),
+        "eta_state": live_eta_state(session, initial_frames),
     }
 
 
