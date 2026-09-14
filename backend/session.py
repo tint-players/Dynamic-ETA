@@ -9,7 +9,8 @@ from uuid import uuid4
 from simulator.config_loader import load_simulation_config
 from simulator.dataset import label_completed_journey, label_completed_multi_train_journey
 from simulator.engine import SimulationEngine
-from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
+from simulator.exporters import BlockVisitExporter
+from simulator.track_aware_exporters import TrackAwareParquetTelemetryExporter as ParquetTelemetryExporter
 from simulator.models import (
     BlockWeatherSchedule,
     MaintenanceRestriction,
