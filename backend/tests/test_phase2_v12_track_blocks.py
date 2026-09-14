@@ -5,6 +5,8 @@ import pytest
 from backend.session import SessionManager
 from simulator.config_loader import simulation_config_from_dict
 from simulator.models import TemporarySpeedRestriction
+from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
+from simulator.track_aware_exporters import TrackAwareParquetTelemetryExporter, TrackBlockVisitExporter
 from simulator.track_blocks import enumerate_track_blocks, get_track_block, locate_track_block, track_block_id
 from simulator.track_block_validation import validate_track_block_config
 
@@ -116,3 +118,41 @@ def test_dict_loader_rejects_ambiguous_multitrack_restriction():
 
     with pytest.raises(ValueError, match="must specify track_id"):
         simulation_config_from_dict(raw)
+
+
+def test_tick_export_contains_canonical_track_block_id():
+    config = _config()
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="v12-export")
+    train = next(item for item in engine.trains if item.train.train_id == "TRAIN-12002")
+    block_start = config.route.block_start_distance_m("BLK-07")
+    train.route_position_m = block_start + 2100.0
+    train.current_track_id = "TRACK-UP"
+
+    frame = engine.snapshot_train(train)
+    telemetry = TrackAwareParquetTelemetryExporter(config).to_dataframe([frame])
+
+    assert telemetry.iloc[0]["block_id"] == "BLK-07"
+    assert telemetry.iloc[0]["track_block_id"] == "UP-BLK-07"
+
+
+def test_crossover_track_change_splits_logical_block_into_two_track_block_visits():
+    config = _config()
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="v12-visits")
+    train = next(item for item in engine.trains if item.train.train_id == "TRAIN-12002")
+    block_start = config.route.block_start_distance_m("BLK-07")
+
+    train.route_position_m = block_start + 2150.0
+    train.current_track_id = "TRACK-UP"
+    up_frame = engine.snapshot_train(train).model_copy(update={"tick": 1, "sim_time_s": 1.0})
+
+    train.route_position_m = block_start + 2250.0
+    train.current_track_id = "TRACK-DOWN"
+    down_frame = engine.snapshot_train(train).model_copy(update={"tick": 2, "sim_time_s": 2.0})
+
+    telemetry = TrackAwareParquetTelemetryExporter(config).to_dataframe([up_frame, down_frame])
+    visits = TrackBlockVisitExporter(config).to_dataframe(telemetry)
+
+    assert visits["track_block_id"].tolist() == ["UP-BLK-07", "DOWN-BLK-07"]
+    assert visits["block_id"].tolist() == ["BLK-07", "BLK-07"]
+    assert visits["track_id_at_entry"].tolist() == ["TRACK-UP", "TRACK-DOWN"]
+    assert visits["track_id_at_exit"].tolist() == ["TRACK-UP", "TRACK-DOWN"]
