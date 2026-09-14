@@ -194,6 +194,20 @@ export interface TelemetryFrame {
   total_journey_time_s: number | null
 }
 
+export interface ETAPrediction {
+  remaining_time_s: number
+  arrival_simulation_s: number
+}
+
+export interface ETAState {
+  available: boolean
+  model_name: string | null
+  message: string | null
+  predictions: Record<string, ETAPrediction>
+}
+
+export const EMPTY_ETA_STATE: ETAState = { available: false, model_name: null, message: null, predictions: {} }
+
 export interface ActiveWeatherConstraint {
   block_id: string
   condition: WeatherCondition
@@ -280,13 +294,14 @@ export interface SessionCreateResponse {
   signal_states: Record<string, SignalAspect>
   crossing_states: Record<string, CrossingState>
   constraint_state: ConstraintState
+  eta_state: ETAState
 }
 
 export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
 export interface ExportPaths { csv: string; parquet: string; block_csv?: string; block_parquet?: string }
 
 export type SocketMessage =
-  | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState> }
+  | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState>; eta_state: ETAState }
   | ({ type: 'playback_state' } & PlaybackState)
   | { type: 'config_update'; config: SimulatorConfigViz }
   | { type: 'constraint_state'; state: ConstraintState }
