@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import SignalAspect, SignalType, WeatherCondition
+from .models import MaintenanceType, SignalAspect, SignalType, WeatherCondition
 from .network_engine import RuntimeTrain, Target
 from .network_engine_v4 import NetworkSimulationEngineV4
 
@@ -14,12 +14,14 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
     keeps that caution speed after passing a YELLOW while the next signal remains
     restrictive, preserves configured station-stop order for turnaround trains,
     adds a conservative station-entry hold when the required platform is
-    physically occupied by another active train, and supports temporary manual
-    signal overrides for Phase-2 anomaly injection.
+    physically occupied by another active train, supports full-stop maintenance
+    closures, and supports temporary manual signal overrides for Phase-2 anomaly
+    injection.
     """
 
     YELLOW_APPROACH_SPEED_KMH = 60.0
     STATION_ENTRY_MARGIN_M = 20.0
+    MAINTENANCE_STOP_MARGIN_M = 20.0
 
     def __init__(self, config, scenario_id: str = "default"):
         super().__init__(config, scenario_id=scenario_id)
@@ -228,6 +230,37 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
                 ))
         return targets
 
+    def _maintenance_closure_targets(self, train: RuntimeTrain) -> list[Target]:
+        targets: list[Target] = []
+        body_start, body_end = self._body_bounds(train)
+        for restriction in self.config.environment.maintenance_restrictions:
+            if restriction.maintenance_type != MaintenanceType.FULL_CLOSURE:
+                continue
+            if not self._restriction_active(restriction):
+                continue
+
+            block_start = self.config.route.block_start_distance_m(restriction.block_id)
+            zone_start = block_start + restriction.start_position_m
+            zone_end = block_start + restriction.end_position_m
+
+            if self._intervals_overlap(body_start, body_end, zone_start, zone_end):
+                stop_position = train.route_position_m + train.sign * 0.01
+            else:
+                entry = zone_start if train.sign > 0 else zone_end
+                if self._ahead(train, entry) is None:
+                    continue
+                stop_position = entry - train.sign * self.MAINTENANCE_STOP_MARGIN_M
+                if self._ahead(train, stop_position) is None:
+                    stop_position = train.route_position_m + train.sign * 0.01
+
+            targets.append(Target(
+                stop_position,
+                0.0,
+                f"MAINTENANCE_CLOSURE:{restriction.restriction_id}",
+                True,
+            ))
+        return targets
+
     def _targets(self, train: RuntimeTrain):
         targets = [
             target
@@ -236,6 +269,7 @@ class NetworkSimulationEngineV4Restrictive(NetworkSimulationEngineV4):
         ]
 
         targets.extend(self._station_occupancy_targets(train))
+        targets.extend(self._maintenance_closure_targets(train))
 
         for stop in train.station_stops:
             if stop.station_id in train.served_stations:
