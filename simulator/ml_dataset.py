@@ -27,19 +27,28 @@ class MLDatasetSplit:
 
 
 class MLTrainingDatasetBuilder:
-    """Build one labelled ETA sample per active train per simulation second.
+    """Build labelled ETA samples from a completed simulation run.
 
-    The input telemetry must already represent a completed and post-run-labelled
-    simulation run. Samples are emitted only while a train is active and before
-    it is marked completed. This keeps the training cadence aligned with live
-    inference: one prediction opportunity for every observable active second.
+    By default one sample is emitted per active train per simulation step. The
+    optional ``sample_every_n_steps`` knob is intended for memory-aware pilot
+    experiments: it only reduces target-sample cadence while the feature history
+    still receives every one-second telemetry frame, so each retained sample
+    keeps the same 60-second temporal context used by live inference.
     """
 
     def __init__(self, config: SimulationConfig):
         self.config = config
         self.sample_builder = MLSampleBuilder(config)
 
-    def build_run_samples(self, frames: Iterable[TelemetryFrame]) -> tuple[MLTrainingSample, ...]:
+    def build_run_samples(
+        self,
+        frames: Iterable[TelemetryFrame],
+        *,
+        sample_every_n_steps: int = 1,
+    ) -> tuple[MLTrainingSample, ...]:
+        if sample_every_n_steps <= 0:
+            raise ValueError("sample_every_n_steps must be positive")
+
         labelled = validate_labelled_training_frames(frames)
         if not labelled:
             return ()
@@ -63,9 +72,12 @@ class MLTrainingDatasetBuilder:
 
         history: list[TelemetryFrame] = []
         samples: list[MLTrainingSample] = []
-        for step_key in sorted(by_step, key=lambda item: (item[1], item[0])):
+        ordered_steps = sorted(by_step, key=lambda item: (item[1], item[0]))
+        for step_index, step_key in enumerate(ordered_steps):
             current = sorted(by_step[step_key], key=lambda frame: frame.train_id)
             history.extend(current)
+            if step_index % sample_every_n_steps != 0:
+                continue
             for target in current:
                 if not target.active or target.completed:
                     continue
