@@ -30,6 +30,11 @@ class CrossingState(str, Enum):
     CLOSED_FOR_TRAIN = "CLOSED_FOR_TRAIN"
 
 
+class MaintenanceType(str, Enum):
+    SPEED_RESTRICTION = "SPEED_RESTRICTION"
+    FULL_CLOSURE = "FULL_CLOSURE"
+
+
 class CurveDirection(str, Enum):
     LEFT = "LEFT"
     RIGHT = "RIGHT"
@@ -234,7 +239,7 @@ class TemporarySpeedRestriction(BaseModel):
 
 
 class MaintenanceRestriction(TemporarySpeedRestriction):
-    pass
+    maintenance_type: MaintenanceType = MaintenanceType.SPEED_RESTRICTION
 
 
 class CrossingTimelineEntry(BaseModel):
