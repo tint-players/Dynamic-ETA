@@ -102,7 +102,7 @@ def test_full_experiment_selects_on_validation_and_saves_checkpoint(monkeypatch,
 
     import simulator.ml_experiment as experiment_module
 
-    monkeypatch.setattr(experiment_module, "build_experiment_samples", lambda _: samples)
+    monkeypatch.setattr(experiment_module, "build_experiment_samples", lambda *_args, **_kwargs: samples)
     result = run_eta_experiment(
         runs,
         experiment=ETAExperimentConfig(
@@ -110,6 +110,7 @@ def test_full_experiment_selects_on_validation_and_saves_checkpoint(monkeypatch,
             batch_size=3,
             early_stopping_patience=1,
             min_validation_improvement_s=0.0,
+            sample_every_n_steps=2,
             lstm_hidden_size=8,
             lstm_layers=1,
             gnn_hidden_size=8,
@@ -139,5 +140,6 @@ def test_full_experiment_selects_on_validation_and_saves_checkpoint(monkeypatch,
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     assert payload["format_version"] == 1
     assert payload["model_name"] == result.winner_name
+    assert payload["experiment_config"]["sample_every_n_steps"] == 2
     assert payload["feature_contract"]["sequence_window_steps"] == 60
     assert tuple(payload["split_run_ids"]["test"]) == result.split.test_run_ids
