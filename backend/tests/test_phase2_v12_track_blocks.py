@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.session import SessionManager
+from backend.session import SessionManager, sessions
 from simulator.config_loader import simulation_config_from_dict
 from simulator.models import TemporarySpeedRestriction
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
@@ -156,3 +156,38 @@ def test_crossover_track_change_splits_logical_block_into_two_track_block_visits
     assert visits["block_id"].tolist() == ["BLK-07", "BLK-07"]
     assert visits["track_id_at_entry"].tolist() == ["TRACK-UP", "TRACK-DOWN"]
     assert visits["track_id_at_exit"].tolist() == ["TRACK-UP", "TRACK-DOWN"]
+
+
+def test_multitrack_session_always_uses_restrictive_network_engine():
+    session = sessions.create("delhi_agra_corridor.yaml")
+    assert isinstance(session.engine, NetworkSimulationEngineV4Restrictive)
+
+
+def test_manual_restriction_requires_track_and_exposes_track_block_id():
+    session = sessions.create("delhi_agra_corridor.yaml")
+
+    with pytest.raises(ValueError, match="track_id is required"):
+        session.inject_speed_restriction(
+            kind="tsr",
+            block_id="BLK-03",
+            track_id=None,
+            start_position_m=100.0,
+            end_position_m=300.0,
+            speed_limit_kmh=40.0,
+            duration_s=60.0,
+        )
+
+    session.inject_speed_restriction(
+        kind="tsr",
+        block_id="BLK-03",
+        track_id="TRACK-DOWN",
+        start_position_m=100.0,
+        end_position_m=300.0,
+        speed_limit_kmh=40.0,
+        duration_s=60.0,
+    )
+    active = session.active_constraints()["tsr"][-1]
+
+    assert active["track_id"] == "TRACK-DOWN"
+    assert active["block_id"] == "BLK-03"
+    assert active["track_block_id"] == "DOWN-BLK-03"
