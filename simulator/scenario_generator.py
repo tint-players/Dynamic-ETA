@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .dataset import label_completed_journey, label_completed_multi_train_journey
 from .engine import SimulationEngine
-from .exporters import BatchExporter
 from .models import (
     BlockWeatherSchedule,
     CrossingState,
@@ -20,6 +19,7 @@ from .models import (
     WeatherTimelineEntry,
 )
 from .network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
+from .track_aware_exporters import TrackAwareBatchExporter
 from .track_blocks import enumerate_track_blocks
 from .track_block_validation import validate_track_block_config
 
@@ -196,8 +196,8 @@ class ScenarioGenerator:
         self._random_signals(config)
         return validate_track_block_config(config)
 
-    def run(self) -> BatchExporter:
-        exporter = BatchExporter()
+    def run(self) -> TrackAwareBatchExporter:
+        exporter = TrackAwareBatchExporter()
         for i in range(self.gen_config.n_scenarios):
             scenario_id = f"scenario_{i:05d}"
             config = self._make_scenario()
