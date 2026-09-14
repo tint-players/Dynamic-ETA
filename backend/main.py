@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from simulator.models import SignalAspect, WeatherCondition
+from simulator.models import MaintenanceType, SignalAspect, WeatherCondition
 
 from .session import SimulationSession, sessions
 from .viz import config_for_visualization
@@ -58,6 +58,7 @@ class SpeedRestrictionInjectionCommand(BaseModel):
     start_position_m: float = Field(ge=0)
     end_position_m: float = Field(gt=0)
     speed_limit_kmh: float = Field(gt=0)
+    maintenance_type: MaintenanceType = MaintenanceType.SPEED_RESTRICTION
     duration_s: float | None = Field(default=300.0, gt=0)
 
 
@@ -190,6 +191,7 @@ async def _handle_injection(websocket: WebSocket, session: SimulationSession, pa
                 end_position_m=command.end_position_m,
                 speed_limit_kmh=command.speed_limit_kmh,
                 duration_s=command.duration_s,
+                maintenance_type=command.maintenance_type,
             )
         except Exception as exc:
             await websocket.send_json({"type": "error", "message": f"Invalid restriction injection: {exc}"})
