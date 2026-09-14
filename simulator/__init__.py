@@ -26,6 +26,14 @@ from .track_blocks import (
     locate_track_block,
     track_block_id,
 )
+from .ml_contract import (
+    ML_FORBIDDEN_LIVE_INPUT_FIELDS,
+    ML_POST_RUN_LABEL_FIELDS,
+    ML_PROVENANCE_FIELDS,
+    attach_run_provenance,
+    new_run_id,
+    validate_labelled_training_frames,
+)
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -54,6 +62,12 @@ __all__ = [
     "get_track_block",
     "locate_track_block",
     "track_block_id",
+    "ML_PROVENANCE_FIELDS",
+    "ML_POST_RUN_LABEL_FIELDS",
+    "ML_FORBIDDEN_LIVE_INPUT_FIELDS",
+    "attach_run_provenance",
+    "new_run_id",
+    "validate_labelled_training_frames",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
