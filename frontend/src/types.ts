@@ -31,6 +31,7 @@ export interface SignalViz {
 export interface RestrictionViz {
   restriction_id: string
   block_id: string
+  track_id: string | null
   start_position_m: number
   end_position_m: number
   speed_limit_kmh: number
@@ -181,6 +182,7 @@ export interface ActiveWeatherConstraint {
 export interface ActiveRestrictionConstraint {
   restriction_id: string
   block_id: string
+  track_id: string | null
   start_position_m: number
   end_position_m: number
   speed_limit_kmh: number
@@ -227,6 +229,7 @@ export type ManualInjectionRequest =
   | {
       command: 'inject_tsr'
       block_id: string
+      track_id: string
       start_position_m: number
       end_position_m: number
       speed_limit_kmh: number
@@ -235,6 +238,7 @@ export type ManualInjectionRequest =
   | {
       command: 'inject_maintenance'
       block_id: string
+      track_id: string
       start_position_m: number
       end_position_m: number
       speed_limit_kmh: number
