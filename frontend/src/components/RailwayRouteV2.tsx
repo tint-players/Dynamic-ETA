@@ -185,7 +185,7 @@ function clampZoom(value: number): number { return Math.max(MIN_ZOOM, Math.min(M
 function snapHalf(value: number): number { return Math.round(value * 2) / 2 }
 function remaining(end: number | null, simTime: number): string { return end == null ? 'until reset' : `${Math.max(0, Math.ceil(end - simTime))}s left` }
 
-export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', selectedRestrictionTrack = '', rangeDraft = null, onRangeDraft, onRangeDraftChange, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {}, constraintState }: {
+export default function RailwayRouteV2({ config, frames, signalStates, crossingStates, selectedTrainId, onSelectTrain, constraintsOpen = false, activeConstraintTool = 'weather', selectedRestrictionTrack = '', rangeDraft = null, onRangeDraft, onRangeDraftChange, onRestrictionTrackSelect, onSignalSelect, selectedSignalId = '', manualSignalOverrides = {}, constraintState }: {
   config: SimulatorConfigViz
   frames: TelemetryFrame[]
   signalStates: Record<string, SignalAspect>
@@ -198,6 +198,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
   rangeDraft?: RangeDraft | null
   onRangeDraft?: (draft: RangeDraft) => void
   onRangeDraftChange?: (draft: RangeDraft | null) => void
+  onRestrictionTrackSelect?: (trackId: string) => void
   onSignalSelect?: (signalId: string) => void
   selectedSignalId?: string
   manualSignalOverrides?: Record<string, ManualSignalOverrideUi>
@@ -224,8 +225,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
     return ratio * config.route.total_length_m
   }
 
-  const chooseRange = (clientX: number) => {
-    if (!constraintsOpen || !selectedRestrictionTrack || (activeConstraintTool !== 'tsr' && activeConstraintTool !== 'maintenance')) return
+  const chooseRange = (clientX: number, trackId: string) => {
+    if (!constraintsOpen || (activeConstraintTool !== 'tsr' && activeConstraintTool !== 'maintenance')) return
     const routeM = pointerRoutePosition(clientX)
     const block = config.route.blocks.find((item) => routeM >= item.route_start_m && routeM <= item.route_end_m) ?? config.route.blocks.at(-1)
     if (!block) return
@@ -237,7 +238,8 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
     if (end > block.length_m) { start -= end - block.length_m; end = block.length_m }
     start = Math.max(0, start)
     end = Math.min(block.length_m, end)
-    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, track_id: selectedRestrictionTrack, start_position_m: Math.round(start), end_position_m: Math.round(end) })
+    onRestrictionTrackSelect?.(trackId)
+    onRangeDraft?.({ kind: activeConstraintTool, block_id: block.block_id, track_id: trackId, start_position_m: Math.round(start), end_position_m: Math.round(end) })
   }
 
   const dragRange = (clientX: number) => {
@@ -251,7 +253,6 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
   const activeTsr = config.environment.temporary_speed_restrictions.filter((item) => item.start_time_s <= simTime && (item.end_time_s == null || simTime < item.end_time_s))
   const activeMaintenance = config.environment.maintenance_restrictions.filter((item) => item.start_time_s <= simTime && (item.end_time_s == null || simTime < item.end_time_s))
-  const selectedRestrictionTrackIdx = selectedRestrictionTrack ? trackIndex(config, selectedRestrictionTrack) : 0
   const restrictionTrackIndexes = (trackId: string | null) => trackId ? [trackIndex(config, trackId)] : config.route.track_ids.map((_, index) => index)
 
   return <section className={`panel route-panel realistic-route-panel route-focus ${constraintsOpen ? 'constraint-editing' : ''}`}>
@@ -262,7 +263,7 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
       {config.route.track_ids.map((id, index) => <g key={id}><path d={fullTrackPath(config, index)} className="track-ballast-path" /><path d={fullTrackPath(config, index)} className="track-bed-path" /><path d={fullTrackPath(config, index)} className="track-sleeper-path" /><path d={fullTrackPath(config, index)} className="track-rail-path" /><text x={24} y={pointAt(config, 0, index).y + 4} className="track-name">{id}</text></g>)}
 
-      {constraintsOpen && selectedRestrictionTrack && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && blocks.map(({ block }) => <path key={`hit-${selectedRestrictionTrack}-${block.block_id}`} d={pathBetween(config, block.route_start_m, block.route_end_m, selectedRestrictionTrackIdx)} className="constraint-hit-path" onClick={(event) => { event.stopPropagation(); chooseRange(event.clientX) }} />)}
+      {constraintsOpen && (activeConstraintTool === 'tsr' || activeConstraintTool === 'maintenance') && config.route.track_ids.map((trackId, trackIdx) => blocks.map(({ block }) => <path key={`hit-${trackId}-${block.block_id}`} d={pathBetween(config, block.route_start_m, block.route_end_m, trackIdx)} className="constraint-hit-path" onClick={(event) => { event.stopPropagation(); chooseRange(event.clientX, trackId) }} />))}
 
       {config.crossovers.map((xover) => { const fromIdx = trackIndex(config, xover.from_track_id); const toIdx = trackIndex(config, xover.to_track_id); const a = pointAt(config, xover.route_start_m, fromIdx); const b = pointAt(config, xover.route_end_m, toIdx); return <g key={xover.crossover_id} className="svg-crossover"><path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} /><text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 12} textAnchor="middle">Single Crossover · {xover.crossover_id}</text></g> })}
 
@@ -296,6 +297,6 @@ export default function RailwayRouteV2({ config, frames, signalStates, crossingS
 
       <text x={LEFT} y={HEIGHT - 16} className="endpoint-svg-label">DELHI SIDE</text><text x={RIGHT} y={HEIGHT - 16} textAnchor="end" className="endpoint-svg-label">AGRA SIDE</text>
     </svg></div>
-    <div className="legend"><span>dynamic signals = block occupancy</span><span>selected track only = restriction draft</span><span>drag handles = resize range</span><span className="crossing-legend road-open-legend">● road open = train stop</span><span><i className="legend-swatch tsr-swatch" />TSR</span><span><i className="legend-swatch maintenance-swatch" />Maintenance</span></div>
+    <div className="legend"><span>dynamic signals = block occupancy</span><span>click either track = select + draft</span><span>drag handles = resize range</span><span className="crossing-legend road-open-legend">● road open = train stop</span><span><i className="legend-swatch tsr-swatch" />TSR</span><span><i className="legend-swatch maintenance-swatch" />Maintenance</span></div>
   </section>
 }
