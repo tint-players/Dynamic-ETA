@@ -92,28 +92,29 @@ def _split_counts(total_runs: int, ratios: Sequence[float]) -> tuple[int, int, i
         raise ValueError("At least one split ratio must be positive")
 
     normalized = [ratio / total_ratio for ratio in ratios]
+    raw = [total_runs * ratio for ratio in normalized]
+    counts = [int(value) for value in raw]
+    leftovers = total_runs - sum(counts)
+
+    priority = sorted(
+        range(3),
+        key=lambda index: (raw[index] - counts[index], normalized[index], -index),
+        reverse=True,
+    )
+    for index in priority[:leftovers]:
+        counts[index] += 1
+
+    # With enough runs, keep every requested split represented without
+    # distorting the normal largest-remainder allocation more than necessary.
     positive = [index for index, ratio in enumerate(normalized) if ratio > 0]
-
-    counts = [0, 0, 0]
-    remaining = total_runs
     if total_runs >= len(positive):
-        for index in positive:
-            counts[index] = 1
-        remaining -= len(positive)
-
-    if remaining:
-        raw = [remaining * ratio for ratio in normalized]
-        floors = [int(value) for value in raw]
-        for index, value in enumerate(floors):
-            counts[index] += value
-        leftovers = remaining - sum(floors)
-        priority = sorted(
-            range(3),
-            key=lambda index: (raw[index] - floors[index], normalized[index], -index),
-            reverse=True,
-        )
-        for index in priority[:leftovers]:
-            counts[index] += 1
+        for empty_index in [index for index in positive if counts[index] == 0]:
+            donors = [index for index in positive if counts[index] > 1]
+            if not donors:
+                break
+            donor = max(donors, key=lambda index: (counts[index], normalized[index], -index))
+            counts[donor] -= 1
+            counts[empty_index] += 1
 
     return counts[0], counts[1], counts[2]
 
