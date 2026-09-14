@@ -7,7 +7,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from .models import SimulationConfig, TelemetryFrame, TrainDirection
+from .models import MaintenanceType, SimulationConfig, TelemetryFrame, TrainDirection
 
 
 class BatchExporter:
@@ -66,14 +66,18 @@ class ParquetTelemetryExporter:
         return contexts
 
     @staticmethod
-    def _restriction_is_active(restriction, frame: TelemetryFrame) -> bool:
+    def _restriction_time_active(restriction, sim_time_s: float) -> bool:
+        if sim_time_s < restriction.start_time_s:
+            return False
+        return restriction.end_time_s is None or sim_time_s < restriction.end_time_s
+
+    @classmethod
+    def _restriction_is_active(cls, restriction, frame: TelemetryFrame) -> bool:
         if restriction.block_id != frame.current_block_id:
             return False
         if not (restriction.start_position_m <= frame.position_in_block_m < restriction.end_position_m):
             return False
-        if frame.sim_time_s < restriction.start_time_s:
-            return False
-        return restriction.end_time_s is None or frame.sim_time_s < restriction.end_time_s
+        return cls._restriction_time_active(restriction, frame.sim_time_s)
 
     def _active_limit(self, restrictions: Iterable, frame: TelemetryFrame) -> float | None:
         limits = [
@@ -82,6 +86,41 @@ class ParquetTelemetryExporter:
             if self._restriction_is_active(restriction, frame)
         ]
         return min(limits) if limits else None
+
+    def _maintenance_context(self, frame: TelemetryFrame) -> tuple[bool, str | None, float | None]:
+        closure_prefix = "MAINTENANCE_CLOSURE:"
+        if frame.control_reason.startswith(closure_prefix):
+            restriction_id = frame.control_reason[len(closure_prefix):]
+            restriction = next(
+                (
+                    item
+                    for item in self.config.environment.maintenance_restrictions
+                    if item.restriction_id == restriction_id
+                    and item.maintenance_type == MaintenanceType.FULL_CLOSURE
+                    and self._restriction_time_active(item, frame.sim_time_s)
+                ),
+                None,
+            )
+            if restriction is not None:
+                return True, MaintenanceType.FULL_CLOSURE.value, None
+
+        active = [
+            restriction
+            for restriction in self.config.environment.maintenance_restrictions
+            if self._restriction_is_active(restriction, frame)
+        ]
+        if not active:
+            return False, None, None
+
+        full_closure = next(
+            (restriction for restriction in active if restriction.maintenance_type == MaintenanceType.FULL_CLOSURE),
+            None,
+        )
+        if full_closure is not None:
+            return True, MaintenanceType.FULL_CLOSURE.value, None
+
+        limit = min(restriction.speed_limit_kmh for restriction in active)
+        return True, MaintenanceType.SPEED_RESTRICTION.value, limit
 
     def _station_context(self, frames: list[TelemetryFrame]) -> dict[tuple[str, int, float], tuple[str | None, float | None]]:
         result: dict[tuple[str, int, float], tuple[str | None, float | None]] = {}
@@ -204,7 +243,7 @@ class ParquetTelemetryExporter:
             history[round(frame.sim_time_s, 6)] = train_speed_mps
 
             current_tsr_limit = self._active_limit(self.config.environment.temporary_speed_restrictions, frame)
-            current_maintenance_limit = self._active_limit(self.config.environment.maintenance_restrictions, frame)
+            maintenance_active, maintenance_type, current_maintenance_limit = self._maintenance_context(frame)
             platform_id, platform_occupied, occupying_train_id = self._platform_occupancy(
                 frame, station_id, same_time_frames
             )
@@ -244,8 +283,8 @@ class ParquetTelemetryExporter:
                 "speed_gradient_30s": speed_gradient_30s,
                 "tsr_active": current_tsr_limit is not None,
                 "current_tsr_limit_kmh": current_tsr_limit,
-                "maintenance_active": current_maintenance_limit is not None,
-                "maintenance_type": "SPEED_RESTRICTION" if current_maintenance_limit is not None else None,
+                "maintenance_active": maintenance_active,
+                "maintenance_type": maintenance_type,
                 "maintenance_limit_kmh": current_maintenance_limit,
                 "station_id": station_id,
                 "station_name": station.station_name if station is not None else None,
@@ -365,10 +404,18 @@ class BlockVisitExporter:
                 crossing_hold_mask = segment["control_reason"].astype(str).str.startswith("CROSSING:") & stopped
                 traffic_hold_mask = segment["control_reason"].astype(str).str.startswith("TRAIN_AHEAD:") & stopped
                 crossover_hold_mask = segment["control_reason"].astype(str).str.startswith("CROSSOVER_RESERVED:") & stopped
+                maintenance_hold_mask = segment["control_reason"].astype(str).str.startswith("MAINTENANCE_CLOSURE:") & stopped
                 dwell_mask = segment["current_station_id"].notna() & stopped
 
                 tsr_limits = pd.to_numeric(segment.loc[tsr_mask, "current_tsr_limit_kmh"], errors="coerce").dropna()
                 maintenance_limits = pd.to_numeric(segment.loc[maintenance_mask, "maintenance_limit_kmh"], errors="coerce").dropna()
+                maintenance_types = segment.loc[maintenance_mask, "maintenance_type"].dropna().astype(str)
+                if (maintenance_types == MaintenanceType.FULL_CLOSURE.value).any():
+                    dominant_maintenance_type = MaintenanceType.FULL_CLOSURE.value
+                elif not maintenance_types.empty:
+                    dominant_maintenance_type = MaintenanceType.SPEED_RESTRICTION.value
+                else:
+                    dominant_maintenance_type = None
                 signal_values = segment["next_signal_aspect"].where(segment["next_signal_aspect"].notna(), None).tolist()
 
                 rows.append({
@@ -398,9 +445,10 @@ class BlockVisitExporter:
                     "tsr_min_limit_kmh": float(tsr_limits.min()) if not tsr_limits.empty else None,
                     "tsr_exposure_s": self._weighted_duration(segment, tsr_mask, exit_time),
                     "maintenance_encountered": bool(maintenance_mask.any()),
-                    "maintenance_type": "SPEED_RESTRICTION" if maintenance_mask.any() else None,
+                    "maintenance_type": dominant_maintenance_type,
                     "maintenance_limit_kmh": float(maintenance_limits.min()) if not maintenance_limits.empty else None,
                     "maintenance_exposure_s": self._weighted_duration(segment, maintenance_mask, exit_time),
+                    "maintenance_hold_time_s": self._weighted_duration(segment, maintenance_hold_mask, exit_time),
                     "yellow_signal_count": self._count_entries(signal_values, "YELLOW"),
                     "red_signal_count": self._count_entries(signal_values, "RED"),
                     "signal_hold_time_s": self._weighted_duration(segment, signal_hold_mask, exit_time),
