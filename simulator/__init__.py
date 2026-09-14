@@ -49,6 +49,7 @@ from .ml_graph import (
     MLGraphTopologyBuilder,
 )
 from .ml_samples import MLModelInputs, MLTrainingSample, MLSampleBuilder
+from .ml_dataset import MLDatasetSplit, MLTrainingDatasetBuilder, split_training_samples_by_run
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -96,6 +97,9 @@ __all__ = [
     "MLModelInputs",
     "MLTrainingSample",
     "MLSampleBuilder",
+    "MLDatasetSplit",
+    "MLTrainingDatasetBuilder",
+    "split_training_samples_by_run",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
