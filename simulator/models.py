@@ -437,6 +437,12 @@ class TelemetryFrame(BaseModel):
     tick: int
     sim_time_s: float
 
+    # Dataset provenance is optional at the raw engine boundary so existing live
+    # simulation paths remain compatible. Dataset builders must populate both
+    # fields before rows are admitted to an ML training dataset.
+    run_id: Optional[str] = None
+    random_seed: Optional[int] = None
+
     track_id: str = "TRACK-1"
     direction: TrainDirection = TrainDirection.FORWARD
     active: bool = True
