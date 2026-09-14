@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .dataset import label_completed_journey, label_completed_multi_train_journey
 from .engine import SimulationEngine
+from .ml_contract import attach_run_provenance, new_run_id, validate_labelled_training_frames
 from .models import (
     BlockWeatherSchedule,
     CrossingState,
@@ -46,7 +47,12 @@ class ScenarioGenerator:
     def __init__(self, base_config: SimulationConfig, gen_config: ScenarioGeneratorConfig):
         self.base_config = base_config
         self.gen_config = gen_config
-        self._rng = random.Random(gen_config.random_seed)
+        self.random_seed = (
+            gen_config.random_seed
+            if gen_config.random_seed is not None
+            else random.SystemRandom().randrange(0, 2**63)
+        )
+        self._rng = random.Random(self.random_seed)
 
     @staticmethod
     def _requires_network_engine(config: SimulationConfig) -> bool:
@@ -200,12 +206,18 @@ class ScenarioGenerator:
         exporter = TrackAwareBatchExporter()
         for i in range(self.gen_config.n_scenarios):
             scenario_id = f"scenario_{i:05d}"
+            run_id = new_run_id()
             config = self._make_scenario()
             frames, is_network = self._run_config(config, scenario_id)
+            frames = attach_run_provenance(
+                frames,
+                run_id=run_id,
+                random_seed=self.random_seed,
+            )
             labelled = (
                 label_completed_multi_train_journey(frames)
                 if is_network
                 else label_completed_journey(frames)
             )
-            exporter.add(labelled)
+            exporter.add(validate_labelled_training_frames(labelled))
         return exporter
