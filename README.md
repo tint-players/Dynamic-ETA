@@ -1,75 +1,99 @@
-# Railway Telemetry Simulator — Phase 1
+# Dynamic ETA — Railway Telemetry Simulator
 
-A standalone, dependency-light simulator core. No web framework, no ML —
-just physics, safety guardrails, and two output modes. Built this way so a
-FastAPI/WebSocket layer and the ETA model can be plugged in later without
-touching this code.
+This repository contains the Phase-2 railway simulation stack used to generate realistic telemetry for dynamic ETA modelling. It includes the simulator core, restrictive multi-train network engine, FastAPI/WebSocket backend, React dashboard, randomized scenario generation, and Parquet/CSV exporters.
 
-## Structure
+## Current operational model
 
+The corridor has shared logical block geometry and track-specific operational sections.
+
+For the Delhi–Agra scenario there are 8 logical blocks and 2 physical tracks, producing 16 canonical track-block identities:
+
+```text
+UP-BLK-01 ... UP-BLK-08
+DOWN-BLK-01 ... DOWN-BLK-08
 ```
+
+A logical block such as `BLK-05` owns shared geometry such as length, gradient and curve information. Operational state that can differ between parallel tracks uses the pair `(track_id, block_id)` and the stable `track_block_id`.
+
+Scope rules:
+
+- shared logical-block state: weather and route geometry;
+- track-specific state: occupancy, signals, TSRs, maintenance restrictions, platform state and traffic;
+- explicit multi-track infrastructure: level crossings and crossovers.
+
+The baseline Delhi–Agra YAML remains CLEAR weather with no TSR or maintenance restriction.
+
+## Important simulator paths
+
+```text
 simulator/
-  models.py             # Pydantic data models (Track, Train, Telemetry, enums)
-  physics.py             # Pure Euler-integration kinematics + EBD formula
-  guardrails.py           # Effective speed ceiling + EBD signal-override lockout
-  anomaly.py             # Anomaly injection (shared by batch & live callers)
-  engine.py              # The tick loop — advances trains one step at a time
-  exporters.py            # BatchExporter (Parquet/CSV) + LiveExporter (JSON)
-  scenario_generator.py    # Randomized batch runs -> training dataset
-  config_loader.py         # YAML -> validated SimulationConfig
-examples/
-  delhi_agra_corridor.yaml # Example corridor + train definition
-output/                    # Generated datasets land here
-smoke_test.py             # End-to-end demonstration script
+  models.py                         Pydantic domain/config/telemetry models
+  track_blocks.py                   canonical track-block identity helpers
+  track_block_validation.py         track-aware configuration validation
+  network_engine.py                 multi-train network foundation
+  network_engine_v4.py              crossover, body occupancy and crossing safety
+  network_engine_v4_restrictive.py  restrictive signalling, station occupancy,
+                                    maintenance closures and manual signals
+  exporters.py                      established telemetry/outcome aggregation
+  track_aware_exporters.py          canonical track-block telemetry/visit adapters
+  scenario_generator.py             randomized batch scenario generation
+  dataset.py                        post-run ground-truth labelling
+backend/
+  session.py                        isolated live sessions and constraint injection
+  main.py                           FastAPI/WebSocket API
+  viz.py                            canonical visualization contract
+frontend/                           React + TypeScript simulator dashboard
+examples/delhi_agra_corridor.yaml   main Phase-2 corridor
+smoke_test.py                       architecture-level end-to-end check
 ```
 
-## Why it's split this way
+## Engine usage
 
-- **`physics.py`** has zero dependencies on anything else — pure math,
-  easy to unit test, easy to swap (e.g. for a fancier integration method later).
-- **`guardrails.py`** and **`anomaly.py`** are separate from `engine.py` so
-  safety rules can change without touching the tick loop, and vice versa.
-- **`engine.py`** doesn't know or care whether it's called in a batch for-loop
-  or from a future async API route — it just exposes `.tick()`.
-- **`exporters.py`** is the only place that knows about JSON/Parquet — this
-  answers the "is JSON mandatory?" question: it isn't, and it's isolated
-  to one file so you can add e.g. a Kafka/Arrow exporter later in one place.
-- **Config is YAML** validated through Pydantic (`models.py`), so you (or a
-  teammate) can add a new corridor or train by copying `examples/*.yaml`
-  and editing values — no code changes needed. The same models also accept
-  plain Python dicts, so a future API request body works identically.
+`NetworkSimulationEngineV4Restrictive` is the current engine for the multi-track Delhi–Agra simulator, live dashboard sessions and multi-track scenario generation.
 
-## Two ways to run it
+`SimulationEngine` is retained as a legacy single-train compatibility/regression engine. It must not be used as the authoritative implementation for multi-train signalling, crossover or track-specific operational behaviour.
 
-**Batch (generate training data):**
+## Dataset identity and leakage rule
+
+Tick telemetry preserves both:
+
+- `block_id` — shared logical/geographic block;
+- `track_block_id` — canonical operational section.
+
+A crossover occurring inside one logical block is therefore exported as separate track-block visits instead of one merged visit.
+
+Ground-truth ETA fields (`actual_remaining_time_s`, arrival time and total journey time) are generated only after a completed run. They are labels, not live model inputs.
+
+## Randomized generation
+
 ```python
 from simulator import load_simulation_config, ScenarioGenerator, ScenarioGeneratorConfig
 
 config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-generator = ScenarioGenerator(config, ScenarioGeneratorConfig(n_scenarios=500))
+generator = ScenarioGenerator(config, ScenarioGeneratorConfig(n_scenarios=100))
 exporter = generator.run()
 exporter.to_parquet("output/training_data.parquet")
 ```
 
-**Live (drive it manually / from a future API):**
-```python
-from simulator import load_simulation_config, SimulationEngine, LiveExporter
+On a multi-track route, generated TSRs are assigned to a specific canonical track-block. Weather remains logical-block scoped.
 
-config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-engine = SimulationEngine(config, scenario_id="demo")
-frames = engine.tick()
-json_str = LiveExporter.to_json(frames[0])  # ready to push over WebSocket
+## Validation
+
+From the repository root:
+
+```bash
+pip install -r backend/requirements.txt
+python smoke_test.py
+pytest backend/tests -q
+
+cd frontend
+npm install
+npm run typecheck
+npm run build
 ```
 
-## Not yet built (by design — comes after this)
-- FastAPI routes / WebSocket server
-- Redis Pub/Sub bridge
-- Neo4j graph sync
-- The actual ETA prediction model
-- Frontend control panel
+The test suite includes signalling/crossover regressions, turnaround behaviour, station occupancy, full maintenance closures, track-specific restrictions, canonical track-block export, visualization contracts and randomized scenario generation.
 
-## Run the smoke test
-```
-pip install pydantic pyyaml pandas pyarrow
-python3 smoke_test.py
-```
+## Next modelling stage
+
+The intended first ETA model is a hybrid temporal + graph model using the 16 canonical track-blocks as graph nodes. Model-visible state must remain observable operational state only; future outcome fields and hidden future disruption clearing times are not features.
