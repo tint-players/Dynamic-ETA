@@ -223,6 +223,7 @@ class SignalStateSchedule(BaseModel):
 class TemporarySpeedRestriction(BaseModel):
     restriction_id: str
     block_id: str
+    track_id: Optional[str] = None
     start_position_m: float = Field(ge=0)
     end_position_m: float = Field(gt=0)
     speed_limit_kmh: float = Field(gt=0)
@@ -407,6 +408,8 @@ class SimulationConfig(BaseModel):
         for restriction in [*self.environment.temporary_speed_restrictions, *self.environment.maintenance_restrictions]:
             if restriction.block_id not in block_ids:
                 raise ValueError(f"Restriction references unknown block {restriction.block_id}")
+            if restriction.track_id is not None and restriction.track_id not in track_ids:
+                raise ValueError(f"Restriction {restriction.restriction_id} references unknown track {restriction.track_id}")
             block = self.route.blocks[self.route.block_index(restriction.block_id)]
             if restriction.end_position_m > block.length_m:
                 raise ValueError(f"Restriction {restriction.restriction_id} exceeds block length")
