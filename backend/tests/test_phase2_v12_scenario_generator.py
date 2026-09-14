@@ -3,7 +3,8 @@ from __future__ import annotations
 from backend.session import SessionManager
 from simulator.network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
 from simulator.scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
-from simulator.track_blocks import get_track_block
+from simulator.track_aware_exporters import TrackAwareBatchExporter
+from simulator.track_blocks import get_track_block, track_block_id
 
 
 def _config():
@@ -42,3 +43,17 @@ def test_delhi_agra_generator_uses_restrictive_network_engine():
 
     assert isinstance(engine, NetworkSimulationEngineV4Restrictive)
     assert len(engine.trains) == 4
+
+
+def test_track_aware_batch_exporter_adds_canonical_identity():
+    config = _config()
+    engine = NetworkSimulationEngineV4Restrictive(config, scenario_id="batch-track-block-check")
+    exporter = TrackAwareBatchExporter()
+    exporter.add(engine.snapshot_all())
+    dataframe = exporter.to_dataframe()
+
+    assert "track_block_id" in dataframe.columns
+    assert all(
+        row.track_block_id == track_block_id(row.track_id, row.current_block_id)
+        for row in dataframe.itertuples()
+    )
