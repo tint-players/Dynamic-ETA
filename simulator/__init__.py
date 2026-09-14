@@ -34,6 +34,14 @@ from .ml_contract import (
     new_run_id,
     validate_labelled_training_frames,
 )
+from .ml_features import (
+    CONTEXT_FEATURE_NAMES,
+    GRAPH_FEATURE_NAMES,
+    SEQUENCE_FEATURE_NAMES,
+    SEQUENCE_WINDOW_STEPS,
+    MLFeatureBatch,
+    MLFeatureBuilder,
+)
 from .scenario_generator import ScenarioGenerator, ScenarioGeneratorConfig
 from .config_loader import load_simulation_config, simulation_config_from_dict
 
@@ -68,6 +76,12 @@ __all__ = [
     "attach_run_provenance",
     "new_run_id",
     "validate_labelled_training_frames",
+    "SEQUENCE_WINDOW_STEPS",
+    "SEQUENCE_FEATURE_NAMES",
+    "GRAPH_FEATURE_NAMES",
+    "CONTEXT_FEATURE_NAMES",
+    "MLFeatureBatch",
+    "MLFeatureBuilder",
     "ScenarioGenerator",
     "ScenarioGeneratorConfig",
     "load_simulation_config",
