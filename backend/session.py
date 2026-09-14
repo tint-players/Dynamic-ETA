@@ -150,6 +150,7 @@ class SimulationSession:
         self,
         kind: str,
         block_id: str,
+        track_id: str,
         start_position_m: float,
         end_position_m: float,
         speed_limit_kmh: float,
@@ -159,6 +160,8 @@ class SimulationSession:
         block = self._block(block_id)
         if block is None:
             raise ValueError(f"Unknown block_id: {block_id}")
+        if track_id not in self.config.route.track_ids:
+            raise ValueError(f"Unknown track_id: {track_id}")
         if start_position_m < 0 or end_position_m > block.length_m:
             raise ValueError(f"Restriction range must stay within {block_id} (0-{block.length_m:g}m)")
 
@@ -170,6 +173,7 @@ class SimulationSession:
             restriction = TemporarySpeedRestriction(
                 restriction_id=f"TSR-MANUAL-{suffix}",
                 block_id=block_id,
+                track_id=track_id,
                 start_position_m=start_position_m,
                 end_position_m=end_position_m,
                 speed_limit_kmh=speed_limit_kmh,
@@ -182,6 +186,7 @@ class SimulationSession:
             restriction = MaintenanceRestriction(
                 restriction_id=f"MAINT-MANUAL-{suffix}",
                 block_id=block_id,
+                track_id=track_id,
                 start_position_m=start_position_m,
                 end_position_m=end_position_m,
                 speed_limit_kmh=speed_limit_kmh,
@@ -197,7 +202,7 @@ class SimulationSession:
         duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
         speed_text = "" if kind == "maintenance" and maintenance_type == MaintenanceType.FULL_CLOSURE else f" at {speed_limit_kmh:g} km/h"
         return (
-            f"{label} {restriction.restriction_id} applied to {block_id} "
+            f"{label} {restriction.restriction_id} applied to {track_id} {block_id} "
             f"{start_position_m:g}-{end_position_m:g}m{speed_text} {duration_text}"
         )
 
