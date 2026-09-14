@@ -131,11 +131,31 @@ MLModelInputs
 
 Both paths also have record adapters for exported Parquet/dataframe-style dictionaries. Tests require record-based and live-frame inference inputs to be exactly equal. Therefore future training and live serving code consume the same model-input contract rather than maintaining separate preprocessing implementations.
 
+## Training dataset construction
+
+`simulator.ml_dataset.MLTrainingDatasetBuilder` converts one completed, labelled simulation run into the actual sequence of training examples. It groups telemetry by simulation second, passes all trains at that second to the shared sample builder, and emits one `MLTrainingSample` for every train that is currently active and not yet completed.
+
+This deliberately excludes pre-departure inactive trains and post-arrival completed rows. Stopped trains, station dwell, signal waits, crossing waits, and other active zero-speed states remain valid prediction samples.
+
+The builder requires exactly one `run_id` at a time and rejects a run that mixes scenario identities or random seeds. This keeps each constructed trajectory internally consistent.
+
+The resulting cadence is therefore:
+
+```text
+run 1 / train A / t=0     -> sample
+run 1 / train A / t=1     -> sample
+run 1 / train B / t=1     -> sample if active
+...
+run 1 / train A / arrival -> no later completed samples
+```
+
 ## Dataset splitting
 
-Rows must never be randomly split independently. All rows sharing a `run_id` belong to exactly one of train, validation, or test. This prevents adjacent one-second observations from the same simulated trajectory from leaking across splits.
+`split_training_samples_by_run()` partitions complete runs, never individual one-second rows. The default ratio is 70% train, 15% validation, 15% test, with deterministic shuffling controlled by `split_seed`.
 
-A later checkpoint will implement the split utility; the required grouping key is fixed here as `run_id`.
+All samples with the same `run_id` are guaranteed to remain in exactly one partition. For small datasets, when there are at least three runs and all three ratios are non-zero, the splitter reserves at least one run for each partition before distributing the remainder. This avoids accidentally evaluating on an empty validation or test set during early experiments.
+
+The split object records both the samples and the exact `run_id` membership for train, validation, and test, making leakage audits straightforward.
 
 ## Current model sample
 
