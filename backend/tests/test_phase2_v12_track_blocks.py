@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.session import SessionManager
+from simulator.config_loader import simulation_config_from_dict
 from simulator.models import TemporarySpeedRestriction
 from simulator.track_blocks import enumerate_track_blocks, get_track_block, locate_track_block, track_block_id
 from simulator.track_block_validation import validate_track_block_config
@@ -99,3 +100,19 @@ def test_track_block_validator_accepts_track_specific_restriction_and_shared_wea
 
     assert validate_track_block_config(config) is config
     assert config.environment.weather[1].block_id == "BLK-02"
+
+
+def test_dict_loader_rejects_ambiguous_multitrack_restriction():
+    raw = _config().model_dump(mode="python")
+    raw["environment"]["temporary_speed_restrictions"] = [{
+        "restriction_id": "AMBIGUOUS-LOAD",
+        "block_id": "BLK-03",
+        "start_position_m": 100.0,
+        "end_position_m": 250.0,
+        "speed_limit_kmh": 45.0,
+        "start_time_s": 0.0,
+        "end_time_s": None,
+    }]
+
+    with pytest.raises(ValueError, match="must specify track_id"):
+        simulation_config_from_dict(raw)
