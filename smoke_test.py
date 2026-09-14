@@ -100,6 +100,13 @@ exporter = generator.run()
 df = exporter.to_dataframe()
 assert df["scenario_id"].nunique() == 2
 assert df["actual_remaining_time_s"].notna().all()
+assert "track_block_id" in df.columns
+assert all(
+    track_block == track_block_id(track, block)
+    for track_block, track, block in zip(
+        df["track_block_id"], df["track_id"], df["current_block_id"]
+    )
+)
 assert set(df["track_id"]).issubset(set(config.route.track_ids))
 
 print(
