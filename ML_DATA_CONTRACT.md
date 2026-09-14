@@ -133,13 +133,15 @@ Both paths also have record adapters for exported Parquet/dataframe-style dictio
 
 ## Training dataset construction
 
-`simulator.ml_dataset.MLTrainingDatasetBuilder` converts one completed, labelled simulation run into the actual sequence of training examples. It groups telemetry by simulation second, passes all trains at that second to the shared sample builder, and emits one `MLTrainingSample` for every train that is currently active and not yet completed.
+`simulator.ml_dataset.MLTrainingDatasetBuilder` converts one completed, labelled simulation run into the actual sequence of training examples. It groups telemetry by simulation second, passes all trains at that second to the shared sample builder, and by default emits one `MLTrainingSample` for every train that is currently active and not yet completed.
 
 This deliberately excludes pre-departure inactive trains and post-arrival completed rows. Stopped trains, station dwell, signal waits, crossing waits, and other active zero-speed states remain valid prediction samples.
 
 The builder requires exactly one `run_id` at a time and rejects a run that mixes scenario identities or random seeds. This keeps each constructed trajectory internally consistent.
 
-The resulting cadence is therefore:
+The default sample cadence remains every simulator step. `sample_every_n_steps` is an optional memory-control knob for pilot experiments. When it is greater than one, only target samples are thinned; every one-second telemetry frame is still appended to history before the retained target is built. Therefore a retained sample continues to use the same 60-second, 1-second-resolution temporal context as live inference. This option is not a change to the production prediction cadence.
+
+The resulting default cadence is therefore:
 
 ```text
 run 1 / train A / t=0     -> sample
@@ -148,6 +150,14 @@ run 1 / train B / t=1     -> sample if active
 ...
 run 1 / train A / arrival -> no later completed samples
 ```
+
+## Randomized scenario retention
+
+`ScenarioGenerator.generate_runs()` returns `GeneratedScenarioRun` objects rather than discarding the scenario configuration after simulation. Each object contains the globally unique `run_id`, scenario identity, generator seed, the exact randomized `SimulationConfig`, and the completed labelled frames.
+
+This exact-config retention is required for offline graph feature construction. Weather, TSR, maintenance, crossings, and signal schedules can differ between generated runs; rebuilding graph features with the unchanged base YAML would silently describe the wrong operational state. `ScenarioGenerator.run()` remains as a backward-compatible tabular export path and is implemented on top of the retained generated runs.
+
+Non-baseline randomized scenarios currently cover shared weather, track-specific TSR, crossing closures, signal restrictions, and track-specific maintenance. Maintenance randomization includes both speed restrictions and finite-duration full closures. Generated full closures always have an end time so scenario generation does not intentionally create permanent deadlocks.
 
 ## Dataset splitting
 
@@ -180,6 +190,16 @@ LSTM + GraphSAGE hybrid
 ```
 
 All neural benchmarks use the same post-run `actual_remaining_time_s` target and Huber regression loss, and they are evaluated only on run-level validation/test partitions.
+
+## Training experiment protocol
+
+`simulator.ml_experiment.run_eta_experiment()` is the canonical ablation experiment runner. All candidate models use one frozen run-level split and therefore see the same train, validation, and held-out test runs.
+
+The three deterministic baselines are evaluated on validation. LSTM-only, GraphSAGE-only, and hybrid models are trained with AdamW and Huber loss, using validation MAE for early stopping/checkpoint selection. Candidate selection is performed using validation MAE only. The held-out test split is not used to select an architecture, tune a checkpoint, or choose an epoch; after the validation winner is fixed, only that winner is evaluated on test.
+
+The command-line entry point is `train_eta_experiment.py`. It records a JSON summary of run/sample membership and candidate validation results. `save_winner_checkpoint()` stores the selected model identity, constructor arguments, neural state dict when applicable, experiment settings, validation/test metrics, exact run IDs for each split, and the sequence/graph/context feature schema. This metadata is part of the audit trail required before a checkpoint is used for live inference.
+
+A small `sample_every_n_steps > 1` value may be used for CI or memory-constrained pilot runs, but any reported experiment must record that value. A statistically meaningful final experiment should use the intended full cadence when hardware/memory allows, or explicitly disclose a different target-sampling cadence.
 
 ## Current model sample
 
