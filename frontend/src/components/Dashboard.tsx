@@ -4,7 +4,7 @@ import type { ConstraintState, CrossingState, ExportPaths, MaintenanceType, Manu
 import RailwayRouteV2 from './RailwayRouteV2'
 
 export interface DebugEvent { id: string; time: number; text: string }
-export interface RangeDraft { kind: 'tsr' | 'maintenance'; block_id: string; start_position_m: number; end_position_m: number }
+export interface RangeDraft { kind: 'tsr' | 'maintenance'; block_id: string; track_id: string; start_position_m: number; end_position_m: number }
 type ConstraintTool = 'weather' | 'tsr' | 'maintenance' | 'signal'
 
 interface DashboardProps {
@@ -52,7 +52,7 @@ function Stepper({ label, value, min, max, step, suffix, onChange }: { label: st
   return <label className="compact-stepper"><span>{label}</span><div><button type="button" onClick={() => set(value - step)}>−</button><strong>{value}{suffix}</strong><button type="button" onClick={() => set(value + step)}>+</button></div></label>
 }
 
-function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selectedSignalId, onSelectedSignal, rangeDraft, onRangeDraft, onInject }: {
+function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selectedSignalId, onSelectedSignal, restrictionTrack, onRestrictionTrack, rangeDraft, onRangeDraft, onInject }: {
   config: SimulatorConfigViz
   simTime: number
   playback: PlaybackState
@@ -60,6 +60,8 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
   onTool: (tool: ConstraintTool) => void
   selectedSignalId: string
   onSelectedSignal: (signalId: string) => void
+  restrictionTrack: string
+  onRestrictionTrack: (trackId: string) => void
   rangeDraft: RangeDraft | null
   onRangeDraft: (draft: RangeDraft | null) => void
   onInject: DashboardProps['onInject']
@@ -68,7 +70,6 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
   const [weatherCondition, setWeatherCondition] = useState<WeatherCondition>('CLEAR')
   const [visibility, setVisibility] = useState(WEATHER_VISIBILITY.CLEAR)
   const [weatherDuration, setWeatherDuration] = useState(300)
-  const [restrictionTrack, setRestrictionTrack] = useState(config.route.track_ids[0] ?? '')
   const [restrictionLimit, setRestrictionLimit] = useState(60)
   const [restrictionDuration, setRestrictionDuration] = useState(300)
   const [maintenanceType, setMaintenanceType] = useState<MaintenanceType>('SPEED_RESTRICTION')
@@ -82,7 +83,7 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
   }
 
   const applyRestriction = () => {
-    if (!rangeDraft || !restrictionTrack) return
+    if (!rangeDraft || !restrictionTrack || rangeDraft.track_id !== restrictionTrack) return
     if (rangeDraft.kind === 'tsr') {
       onInject({ command: 'inject_tsr', block_id: rangeDraft.block_id, track_id: restrictionTrack, start_position_m: rangeDraft.start_position_m, end_position_m: rangeDraft.end_position_m, speed_limit_kmh: restrictionLimit, duration_s: restrictionDuration })
     } else {
@@ -97,11 +98,11 @@ function ConstraintDrawer({ config, simTime, playback, activeTool, onTool, selec
 
     {activeTool === 'weather' && <div className="drawer-section"><div className="drawer-section-title"><strong>Weather</strong><span>timed by simulation clock</span></div><label className="drawer-field">Block<select value={weatherBlock} onChange={(event) => setWeatherBlock(event.target.value)}>{config.route.blocks.map((block) => <option key={block.block_id} value={block.block_id}>{block.block_id}</option>)}</select></label><label className="drawer-field">Condition<select value={weatherCondition} onChange={(event) => chooseWeather(event.target.value as WeatherCondition)}><option value="CLEAR">CLEAR</option><option value="RAIN">RAIN</option><option value="HEAVY_RAIN">HEAVY RAIN</option><option value="FOG">FOG</option><option value="HEAVY_FOG">HEAVY FOG</option></select></label><Stepper label="Visibility" value={visibility} min={100} max={20000} step={100} suffix=" m" onChange={setVisibility} /><Stepper label="Duration" value={weatherDuration} min={10} max={3600} step={10} suffix=" s" onChange={setWeatherDuration} /><button className="drawer-apply" disabled={disabled || !weatherBlock} onClick={() => onInject({ command: 'inject_weather', block_id: weatherBlock, condition: weatherCondition, visibility_m: visibility, duration_s: weatherDuration })}>Apply weather</button></div>}
 
-    {(activeTool === 'tsr' || activeTool === 'maintenance') && <div className="drawer-section"><div className="drawer-section-title"><strong>{activeTool === 'tsr' ? 'Temporary speed restriction' : 'Maintenance'}</strong><span>block range + physical track</span></div><label className="drawer-field">Track<select value={restrictionTrack} onChange={(event) => setRestrictionTrack(event.target.value)}>{config.route.track_ids.map((trackId) => <option key={trackId} value={trackId}>{trackId}</option>)}</select></label>{activeTool === 'maintenance' && <label className="drawer-field">Mode<select value={maintenanceType} onChange={(event) => setMaintenanceType(event.target.value as MaintenanceType)}><option value="SPEED_RESTRICTION">SPEED RESTRICTION</option><option value="FULL_CLOSURE">FULL CLOSURE</option></select></label>}<div className={`range-readout ${rangeDraft?.kind === activeTool ? 'ready' : ''}`}>{rangeDraft?.kind === activeTool ? <><strong>{restrictionTrack} · {rangeDraft.block_id}</strong><span>{Math.round(rangeDraft.start_position_m)}m → {Math.round(rangeDraft.end_position_m)}m</span><small>{Math.round(rangeDraft.end_position_m - rangeDraft.start_position_m)}m selected · drag either handle on the network</small></> : <><strong>No range selected</strong><span>Select a track, then click the live railway</span><small>A centered 200m block range will be created automatically.</small></>}</div>{rangeDraft?.kind === activeTool && <button type="button" className="drawer-remove" onClick={() => onRangeDraft(null)}>Remove selection</button>}{(activeTool === 'tsr' || maintenanceType === 'SPEED_RESTRICTION') && <Stepper label="Speed limit" value={restrictionLimit} min={10} max={160} step={5} suffix=" km/h" onChange={setRestrictionLimit} />}<Stepper label="Duration" value={restrictionDuration} min={10} max={3600} step={10} suffix=" s" onChange={setRestrictionDuration} /><button className="drawer-apply" disabled={disabled || !restrictionTrack || !rangeDraft || rangeDraft.kind !== activeTool} onClick={applyRestriction}>Apply {activeTool === 'tsr' ? 'TSR' : maintenanceType === 'FULL_CLOSURE' ? 'full closure' : 'maintenance'}</button></div>}
+    {(activeTool === 'tsr' || activeTool === 'maintenance') && <div className="drawer-section"><div className="drawer-section-title"><strong>{activeTool === 'tsr' ? 'Temporary speed restriction' : 'Maintenance'}</strong><span>block range + physical track</span></div><label className="drawer-field">Track<select value={restrictionTrack} onChange={(event) => onRestrictionTrack(event.target.value)}>{config.route.track_ids.map((trackId) => <option key={trackId} value={trackId}>{trackId}</option>)}</select></label>{activeTool === 'maintenance' && <label className="drawer-field">Mode<select value={maintenanceType} onChange={(event) => setMaintenanceType(event.target.value as MaintenanceType)}><option value="SPEED_RESTRICTION">SPEED RESTRICTION</option><option value="FULL_CLOSURE">FULL CLOSURE</option></select></label>}<div className={`range-readout ${rangeDraft?.kind === activeTool ? 'ready' : ''}`}>{rangeDraft?.kind === activeTool ? <><strong>{rangeDraft.track_id} · {rangeDraft.block_id}</strong><span>{Math.round(rangeDraft.start_position_m)}m → {Math.round(rangeDraft.end_position_m)}m</span><small>{Math.round(rangeDraft.end_position_m - rangeDraft.start_position_m)}m selected · drag either handle on the selected track</small></> : <><strong>No range selected</strong><span>Select a track, then click that railway track</span><small>A centered 200m section will be created only on the selected physical track.</small></>}</div>{rangeDraft?.kind === activeTool && <button type="button" className="drawer-remove" onClick={() => onRangeDraft(null)}>Remove selection</button>}{(activeTool === 'tsr' || maintenanceType === 'SPEED_RESTRICTION') && <Stepper label="Speed limit" value={restrictionLimit} min={10} max={160} step={5} suffix=" km/h" onChange={setRestrictionLimit} />}<Stepper label="Duration" value={restrictionDuration} min={10} max={3600} step={10} suffix=" s" onChange={setRestrictionDuration} /><button className="drawer-apply" disabled={disabled || !restrictionTrack || !rangeDraft || rangeDraft.kind !== activeTool || rangeDraft.track_id !== restrictionTrack} onClick={applyRestriction}>Apply {activeTool === 'tsr' ? 'TSR' : maintenanceType === 'FULL_CLOSURE' ? 'full closure' : 'maintenance'}</button></div>}
 
     {activeTool === 'signal' && <div className="drawer-section"><div className="drawer-section-title"><strong>Manual signal</strong><span>restrictive override only</span></div><label className="drawer-field">Signal<select value={selectedSignalId} onChange={(event) => onSelectedSignal(event.target.value)}>{config.signals.map((signal) => <option key={signal.signal_id} value={signal.signal_id}>{signal.signal_id} · {signal.protected_block_id}</option>)}</select></label><div className="aspect-selector">{(['YELLOW', 'RED'] as SignalAspect[]).map((aspect) => <button key={aspect} type="button" className={`${aspect.toLowerCase()} ${signalAspect === aspect ? 'selected' : ''}`} onClick={() => setSignalAspect(aspect)}>{aspect}</button>)}</div><Stepper label="Duration" value={signalDuration} min={10} max={1800} step={10} suffix=" s" onChange={setSignalDuration} /><button className="drawer-apply" disabled={disabled || !selectedSignalId} onClick={() => onInject({ command: 'inject_signal', signal_id: selectedSignalId, aspect: signalAspect, duration_s: signalDuration })}>Override signal</button><button type="button" className="drawer-remove" disabled={!selectedSignalId} onClick={() => onInject({ command: 'reset_signal', signal_id: selectedSignalId })}>Reset signal to automatic</button></div>}
 
-    <div className="drawer-tip"><strong>Direct manipulation</strong><span>TSR/Maintenance: choose TRACK-UP or TRACK-DOWN, then click the route for a 200m range and drag either edge. Full closure stops only trains on the selected track before the maintenance zone.</span></div>
+    <div className="drawer-tip"><strong>Direct manipulation</strong><span>TSR/Maintenance: choose TRACK-UP or TRACK-DOWN, then click only that track for a 200m range and drag either edge. Full closure stops only trains on that selected track.</span></div>
   </aside>
 }
 
@@ -125,7 +126,7 @@ function SpeedChart({ history }: { history: TelemetryFrame[] }) {
 }
 
 function EventLog({ events }: { events: DebugEvent[] }) {
-  return <section className="panel event-panel"><div className="panel-heading"><h2>Event log</h2><span>{events.length} events</span></div><div className="event-list">{[...events].reverse().map((event) => <div className="event-row" key={event.id}><time>{event.time.toFixed(0)}s</time><span>{event.text}</span></div>)}</div></section>
+  return <section className="panel event-panel"><div className="panel-heading"><h2>Event log</h2><span>{events.length} events</span></div><div className="event-list">{[...events].reverse().map((event) => <div className="event-row" key={event.id}><time>{event.time.toFixed(0)}s</time><span>{event.text}</span></div>)}</section>
 }
 
 export default function Dashboard(props: DashboardProps) {
@@ -133,6 +134,7 @@ export default function Dashboard(props: DashboardProps) {
   const [constraintsOpen, setConstraintsOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<ConstraintTool>('weather')
   const [selectedSignalId, setSelectedSignalId] = useState(config.signals[0]?.signal_id ?? '')
+  const [restrictionTrack, setRestrictionTrack] = useState(config.route.track_ids[0] ?? '')
   const [rangeDraft, setRangeDraft] = useState<RangeDraft | null>(null)
   const [drawerResetKey, setDrawerResetKey] = useState(0)
 
@@ -140,12 +142,17 @@ export default function Dashboard(props: DashboardProps) {
 
   const resetUi = () => {
     setRangeDraft(null)
+    setRestrictionTrack(config.route.track_ids[0] ?? '')
     setActiveTool('weather')
     setDrawerResetKey((value) => value + 1)
   }
   const resetSimulation = () => { resetUi(); props.onReset() }
   const resetConstraints = () => { resetUi(); props.onResetConstraints() }
   const chooseTool = (tool: ConstraintTool) => { if (tool !== activeTool) setRangeDraft(null); setActiveTool(tool) }
+  const chooseRestrictionTrack = (trackId: string) => {
+    setRestrictionTrack(trackId)
+    setRangeDraft((draft) => draft ? { ...draft, track_id: trackId } : draft)
+  }
 
-  return <main className={`dashboard ${constraintsOpen ? 'constraints-open' : ''}`}><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="topbar-actions"><button type="button" className={`constraints-toggle ${constraintsOpen ? 'open' : ''}`} onClick={() => setConstraintsOpen((open) => !open)}>Constraints {constraintsOpen ? '×' : '→'}</button><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></div></header><div className="dashboard-workspace"><div className="dashboard-main"><SimulationControls {...props} onReset={resetSimulation} onResetConstraints={resetConstraints} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} constraintsOpen={constraintsOpen} activeConstraintTool={activeTool} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onRangeDraftChange={setRangeDraft} onSignalSelect={(signalId) => { setSelectedSignalId(signalId); setActiveTool('signal') }} selectedSignalId={selectedSignalId} manualSignalOverrides={manualSignalOverrides} constraintState={constraintState} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} /></div>{constraintsOpen && <ConstraintDrawer key={drawerResetKey} config={config} simTime={frame.sim_time_s} playback={playback} activeTool={activeTool} onTool={chooseTool} selectedSignalId={selectedSignalId} onSelectedSignal={setSelectedSignalId} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onInject={props.onInject} />}</div>{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
+  return <main className={`dashboard ${constraintsOpen ? 'constraints-open' : ''}`}><header className="topbar"><div><span className="eyebrow">Component A · multi-train network simulation</span><h1>Dynamic-ETA Railway Simulator</h1></div><div className="topbar-actions"><button type="button" className={`constraints-toggle ${constraintsOpen ? 'open' : ''}`} onClick={() => setConstraintsOpen((open) => !open)}>Constraints {constraintsOpen ? '×' : '→'}</button><div className="scenario-card"><span>{frame.scenario_id}</span><strong>{frames.length} live trains · {config.stations.length} stations</strong><small>{config.dynamic_signalling ? 'occupancy-driven signalling' : 'scheduled signalling'}</small></div></div></header><div className="dashboard-workspace"><div className="dashboard-main"><SimulationControls {...props} onReset={resetSimulation} onResetConstraints={resetConstraints} /><RailwayRouteV2 config={config} frames={frames} signalStates={signalStates} crossingStates={crossingStates} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} constraintsOpen={constraintsOpen} activeConstraintTool={activeTool} selectedRestrictionTrack={restrictionTrack} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onRangeDraftChange={setRangeDraft} onSignalSelect={(signalId) => { setSelectedSignalId(signalId); setActiveTool('signal') }} selectedSignalId={selectedSignalId} manualSignalOverrides={manualSignalOverrides} constraintState={constraintState} /><FleetPanel frames={frames} selectedTrainId={selectedTrainId} onSelectTrain={onSelectTrain} /><div className="two-column"><TrainStatePanel frame={frame} config={config} /><ConstraintPanel frame={frame} /></div><SpeedChart history={history} /><EventLog events={events} /></div>{constraintsOpen && <ConstraintDrawer key={drawerResetKey} config={config} simTime={frame.sim_time_s} playback={playback} activeTool={activeTool} onTool={chooseTool} selectedSignalId={selectedSignalId} onSelectedSignal={setSelectedSignalId} restrictionTrack={restrictionTrack} onRestrictionTrack={chooseRestrictionTrack} rangeDraft={rangeDraft} onRangeDraft={setRangeDraft} onInject={props.onInject} />}</div>{playback.complete && <div className="complete-banner">All trains complete at {frame.sim_time_s.toFixed(0)} s{exportPaths && <div>Dataset exported · CSV: {exportPaths.csv} · Parquet: {exportPaths.parquet}</div>}</div>}</main>
 }
