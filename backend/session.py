@@ -13,6 +13,7 @@ from simulator.exporters import BlockVisitExporter, ParquetTelemetryExporter
 from simulator.models import (
     BlockWeatherSchedule,
     MaintenanceRestriction,
+    MaintenanceType,
     SignalAspect,
     SimulationConfig,
     TelemetryFrame,
@@ -153,6 +154,7 @@ class SimulationSession:
         end_position_m: float,
         speed_limit_kmh: float,
         duration_s: float | None,
+        maintenance_type: MaintenanceType = MaintenanceType.SPEED_RESTRICTION,
     ) -> str:
         block = self._block(block_id)
         if block is None:
@@ -183,18 +185,20 @@ class SimulationSession:
                 start_position_m=start_position_m,
                 end_position_m=end_position_m,
                 speed_limit_kmh=speed_limit_kmh,
+                maintenance_type=maintenance_type,
                 start_time_s=start_time_s,
                 end_time_s=end_time_s,
             )
             self.config.environment.maintenance_restrictions.append(restriction)
-            label = "Maintenance speed limit"
+            label = "Maintenance closure" if maintenance_type == MaintenanceType.FULL_CLOSURE else "Maintenance speed limit"
         else:
             raise ValueError(f"Unknown restriction kind: {kind}")
 
         duration_text = "until reset" if duration_s is None else f"for {duration_s:g}s"
+        speed_text = "" if kind == "maintenance" and maintenance_type == MaintenanceType.FULL_CLOSURE else f" at {speed_limit_kmh:g} km/h"
         return (
             f"{label} {restriction.restriction_id} applied to {block_id} "
-            f"{start_position_m:g}-{end_position_m:g}m at {speed_limit_kmh:g} km/h {duration_text}"
+            f"{start_position_m:g}-{end_position_m:g}m{speed_text} {duration_text}"
         )
 
     def active_constraints(self) -> dict[str, Any]:
