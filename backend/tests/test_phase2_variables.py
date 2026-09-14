@@ -159,8 +159,8 @@ def test_reset_constraints_preserves_simulation_position_and_clears_manual_state
     session = SessionManager().create("delhi_agra_corridor.yaml")
     session.engine.sim_time_s = 40
     session.inject_weather("BLK-02", WeatherCondition.FOG, 1000, 300)
-    session.inject_speed_restriction("tsr", "BLK-03", 100, 300, 65, 180)
-    session.inject_speed_restriction("maintenance", "BLK-04", 200, 400, 40, 240)
+    session.inject_speed_restriction("tsr", "BLK-03", 100, 300, 65, 180, track_id="TRACK-UP")
+    session.inject_speed_restriction("maintenance", "BLK-04", 200, 400, 40, 240, track_id="TRACK-UP")
     session.inject_signal("UP-04", SignalAspect.RED, 60)
     session.reset_constraints()
     assert session.engine.sim_time_s == 40
@@ -177,8 +177,8 @@ def test_session_live_injection_mutates_current_run_and_reset_restores_yaml_base
     session = SessionManager().create("delhi_agra_corridor.yaml")
     session.engine.sim_time_s = 40
     session.inject_weather("BLK-02", WeatherCondition.FOG, 900, 120)
-    session.inject_speed_restriction("tsr", "BLK-03", 100, 700, 65, 180)
-    session.inject_speed_restriction("maintenance", "BLK-04", 200, 900, 40, 240)
+    session.inject_speed_restriction("tsr", "BLK-03", 100, 700, 65, 180, track_id="TRACK-UP")
+    session.inject_speed_restriction("maintenance", "BLK-04", 200, 900, 40, 240, track_id="TRACK-UP")
     session.inject_signal("UP-04", SignalAspect.RED, 60)
     assert len(session.config.environment.temporary_speed_restrictions) == 1
     assert len(session.config.environment.maintenance_restrictions) == 1
