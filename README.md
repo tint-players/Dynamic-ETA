@@ -62,7 +62,7 @@ python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 python smoke_test.py
 pytest backend/tests -q
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
@@ -85,7 +85,7 @@ The Vite development server normally opens the dashboard at `http://localhost:51
 For the packaged Phase-3 live model:
 
 ```bash
-pip install -r requirements-ml.txt
+pip install -r requirements.txt
 python scripts/setup_live_eta.py
 ```
 

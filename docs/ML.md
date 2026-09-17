@@ -47,8 +47,8 @@ Both live simulator frames and exported records converge on the same core path:
 
 ```text
 live TelemetryFrame history ─┐
-                            ├─> shared feature builder ─> model inputs
-exported/offline records ───┘
+                             ├─> shared feature builder ─> model inputs
+exported/offline records   ──┘
 ```
 
 Record adapters reconstruct the telemetry contract and then call the same builder. Export-only fields do not silently create a separate preprocessing implementation.
@@ -179,8 +179,7 @@ The checkpoint is not treated as ordinary source code. The setup script installs
 Install the backend and ML dependencies used by this branch, then run:
 
 ```bash
-pip install -r backend/requirements.txt
-pip install -r requirements-ml.txt
+pip install -r requirements.txt
 python scripts/setup_live_eta.py
 ```
 

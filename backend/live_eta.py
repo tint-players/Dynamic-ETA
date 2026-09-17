@@ -16,7 +16,7 @@ class LiveETARuntime:
     PyTorch remains an optional dependency for the simulator/dashboard. Importing
     this module never imports torch; loading the checkpoint does. That preserves
     the existing lightweight backend path while allowing ML-enabled deployments
-    to install ``requirements-ml.txt`` and get live ETA predictions.
+    to install ``requirements.txt`` and get live ETA predictions.
     """
 
     def __init__(self, checkpoint_path: Path) -> None:
