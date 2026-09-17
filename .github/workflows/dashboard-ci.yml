@@ -30,7 +30,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run simulator smoke test
         run: python smoke_test.py

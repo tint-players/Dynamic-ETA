@@ -24,7 +24,7 @@ From the repository root:
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 uvicorn backend.main:app --reload --port 8000
 ```
 
