@@ -10,7 +10,6 @@ Use these documents as the source of truth instead of duplicating architecture/p
 
 - **[Project Overview](docs/OVERVIEW.md)** — problem scope, end-to-end architecture, simulator/ML/backend relationship and current status.
 - **[Simulator & Data Generation](docs/SIMULATOR.md)** — railway representation, engine behaviour, telemetry, randomized scenarios and ground-truth generation.
-- **[Machine Learning](docs/ML.md)** — dataset contract, leakage prevention, feature engineering, railway graph, model experiments and live ETA packaging.
 - **[File Structure](docs/FILE_STRUCTURE.md)** — dedicated repository path/file-location reference.
 
 ## End-to-end flow
@@ -94,8 +93,6 @@ Automatic checkpoint retrieval requires an authenticated GitHub CLI. A manually 
 ```bash
 python scripts/setup_live_eta.py --source /path/to/eta_winner.pt
 ```
-
-See [Machine Learning](docs/ML.md) for the checkpoint contract and live-inference details.
 
 ## Dataset safety rule
 

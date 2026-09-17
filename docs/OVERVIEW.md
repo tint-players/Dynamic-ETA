@@ -79,7 +79,6 @@ The experiment stack contains deterministic ETA baselines, LSTM-only, GraphSAGE-
 
 The currently packaged live checkpoint predicts remaining time to the train's final journey destination. Intermediate/station-wise ETA is not implemented by the current target contract and should be treated as a future modelling extension rather than an existing capability.
 
-See [Machine Learning](ML.md) for the complete data contract, feature construction, topology, training and live-inference design.
 
 ## Backend and dashboard
 
@@ -107,5 +106,4 @@ The project uses simulator smoke tests, backend regression tests and frontend Ty
 
 - [README](../README.md) — navigation and quick start.
 - [Simulator & Data Generation](SIMULATOR.md) — simulator architecture, telemetry and randomized data generation.
-- [Machine Learning](ML.md) — dataset contract, features, graph, models, experiments and live ETA.
 - [File Structure](FILE_STRUCTURE.md) — repository path reference.

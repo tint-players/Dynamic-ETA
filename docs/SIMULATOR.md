@@ -169,5 +169,3 @@ From the repository root, simulator/backend validation includes the smoke test a
 ## 18. Relationship to ML
 
 The simulator is the data source; it is not the ETA predictor. Completed runs provide labelled trajectories, while live frames provide inference-safe observations. The ML layer converts these observations into temporal, graph and train-context features.
-
-Continue with [Machine Learning](ML.md).
