@@ -1,99 +1,129 @@
-# Dynamic ETA — Railway Telemetry Simulator
+# Dynamic ETA — Railway Telemetry & ETA Prediction
 
-This repository contains the Phase-2 railway simulation stack used to generate realistic telemetry for dynamic ETA modelling. It includes the simulator core, restrictive multi-train network engine, FastAPI/WebSocket backend, React dashboard, randomized scenario generation, and Parquet/CSV exporters.
+Dynamic ETA combines a multi-train railway simulator, synthetic telemetry generation, machine-learning ETA modelling, live backend inference and a React dashboard.
+
+The current repository models the Delhi–Agra corridor with 8 shared logical blocks across 2 physical tracks, producing 16 canonical operational track-blocks. The simulator generates one-second operational telemetry that can be labelled after completed journeys and transformed into temporal, graph and train-context inputs for ETA modelling.
+
+## Documentation
+
+Use these documents as the source of truth instead of duplicating architecture/path information across multiple root Markdown files:
+
+- **[Project Overview](docs/OVERVIEW.md)** — problem scope, end-to-end architecture, simulator/ML/backend relationship and current status.
+- **[Simulator & Data Generation](docs/SIMULATOR.md)** — railway representation, engine behaviour, telemetry, randomized scenarios and ground-truth generation.
+- **[Machine Learning](docs/ML.md)** — dataset contract, leakage prevention, feature engineering, railway graph, model experiments and live ETA packaging.
+- **[File Structure](docs/FILE_STRUCTURE.md)** — dedicated repository path/file-location reference.
+
+## End-to-end flow
+
+```text
+Delhi–Agra configuration
+        ↓
+Railway simulator
+        ↓
+1-second telemetry
+        ↓
+Randomized / completed runs
+        ↓
+Post-run ground-truth labels
+        ↓
+Feature engineering
+  ┌─────┼─────┐
+  ↓     ↓     ↓
+60 s   graph  train
+seq.   state  context
+  └─────┼─────┘
+        ↓
+ETA model
+        ↓
+Live backend / dashboard
+```
 
 ## Current operational model
 
-The corridor has shared logical block geometry and track-specific operational sections.
-
-For the Delhi–Agra scenario there are 8 logical blocks and 2 physical tracks, producing 16 canonical track-block identities:
+The canonical track-block identities are:
 
 ```text
 UP-BLK-01 ... UP-BLK-08
 DOWN-BLK-01 ... DOWN-BLK-08
 ```
 
-A logical block such as `BLK-05` owns shared geometry such as length, gradient and curve information. Operational state that can differ between parallel tracks uses the pair `(track_id, block_id)` and the stable `track_block_id`.
+Route geometry and weather are shared at logical-block level. Occupancy, signals, TSRs, maintenance, platform state and traffic are track-specific. Crossings and crossovers explicitly identify the tracks they affect.
 
-Scope rules:
+`NetworkSimulationEngineV4Restrictive` is the authoritative multi-track engine. The legacy `SimulationEngine` is retained only for compatibility/regression and is not the source of truth for multi-train signalling, crossovers or track-specific operational behaviour.
 
-- shared logical-block state: weather and route geometry;
-- track-specific state: occupancy, signals, TSRs, maintenance restrictions, platform state and traffic;
-- explicit multi-track infrastructure: level crossings and crossovers.
+## Quick start
 
-The baseline Delhi–Agra YAML remains CLEAR weather with no TSR or maintenance restriction.
-
-## Important simulator paths
-
-```text
-simulator/
-  models.py                         Pydantic domain/config/telemetry models
-  track_blocks.py                   canonical track-block identity helpers
-  track_block_validation.py         track-aware configuration validation
-  network_engine.py                 multi-train network foundation
-  network_engine_v4.py              crossover, body occupancy and crossing safety
-  network_engine_v4_restrictive.py  restrictive signalling, station occupancy,
-                                    maintenance closures and manual signals
-  exporters.py                      established telemetry/outcome aggregation
-  track_aware_exporters.py          canonical track-block telemetry/visit adapters
-  scenario_generator.py             randomized batch scenario generation
-  dataset.py                        post-run ground-truth labelling
-backend/
-  session.py                        isolated live sessions and constraint injection
-  main.py                           FastAPI/WebSocket API
-  viz.py                            canonical visualization contract
-frontend/                           React + TypeScript simulator dashboard
-examples/delhi_agra_corridor.yaml   main Phase-2 corridor
-smoke_test.py                       architecture-level end-to-end check
-```
-
-## Engine usage
-
-`NetworkSimulationEngineV4Restrictive` is the current engine for the multi-track Delhi–Agra simulator, live dashboard sessions and multi-track scenario generation.
-
-`SimulationEngine` is retained as a legacy single-train compatibility/regression engine. It must not be used as the authoritative implementation for multi-train signalling, crossover or track-specific operational behaviour.
-
-## Dataset identity and leakage rule
-
-Tick telemetry preserves both:
-
-- `block_id` — shared logical/geographic block;
-- `track_block_id` — canonical operational section.
-
-A crossover occurring inside one logical block is therefore exported as separate track-block visits instead of one merged visit.
-
-Ground-truth ETA fields (`actual_remaining_time_s`, arrival time and total journey time) are generated only after a completed run. They are labels, not live model inputs.
-
-## Randomized generation
-
-```python
-from simulator import load_simulation_config, ScenarioGenerator, ScenarioGeneratorConfig
-
-config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-generator = ScenarioGenerator(config, ScenarioGeneratorConfig(n_scenarios=100))
-exporter = generator.run()
-exporter.to_parquet("output/training_data.parquet")
-```
-
-On a multi-track route, generated TSRs are assigned to a specific canonical track-block. Weather remains logical-block scoped.
-
-## Validation
+### Simulator/backend
 
 From the repository root:
 
 ```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+
 pip install -r backend/requirements.txt
+python smoke_test.py
+pytest backend/tests -q
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### Frontend
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite development server normally opens the dashboard at `http://localhost:5173`.
+
+### Live ML ETA checkpoint
+
+For the packaged Phase-3 live model:
+
+```bash
+pip install -r requirements-ml.txt
+python scripts/setup_live_eta.py
+```
+
+Automatic checkpoint retrieval requires an authenticated GitHub CLI. A manually downloaded checkpoint can instead be installed with:
+
+```bash
+python scripts/setup_live_eta.py --source /path/to/eta_winner.pt
+```
+
+See [Machine Learning](docs/ML.md) for the checkpoint contract and live-inference details.
+
+## Dataset safety rule
+
+Ground-truth outcome fields are generated only after a completed journey. In particular:
+
+```text
+actual_remaining_time_s
+actual_arrival_simulation_s
+total_journey_time_s
+```
+
+are labels/outcomes and must not be used as live model inputs.
+
+## Current ML scope
+
+The packaged Phase-3 model predicts remaining time to the final journey destination. The broader project goal includes ETA for upcoming/intermediate stations, but station-wise ETA requires a new target/label design and retraining; it is not an existing capability of the current checkpoint.
+
+## Validation
+
+A standard validation pass is:
+
+```bash
 python smoke_test.py
 pytest backend/tests -q
 
 cd frontend
-npm install
 npm run typecheck
 npm run build
 ```
 
-The test suite includes signalling/crossover regressions, turnaround behaviour, station occupancy, full maintenance closures, track-specific restrictions, canonical track-block export, visualization contracts and randomized scenario generation.
-
-## Next modelling stage
-
-The intended first ETA model is a hybrid temporal + graph model using the 16 canonical track-blocks as graph nodes. Model-visible state must remain observable operational state only; future outcome fields and hidden future disruption clearing times are not features.
+For detailed behaviour, contracts and implementation notes, follow the documentation links above. File locations are maintained only in [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md).
