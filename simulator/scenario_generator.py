@@ -4,9 +4,8 @@ import copy
 import random
 from dataclasses import dataclass
 
-from .dataset import label_completed_journey
+from .dataset import label_completed_journey, label_completed_multi_train_journey
 from .engine import SimulationEngine
-from .exporters import BatchExporter
 from .models import (
     BlockWeatherSchedule,
     CrossingState,
@@ -19,6 +18,10 @@ from .models import (
     WeatherCondition,
     WeatherTimelineEntry,
 )
+from .network_engine_v4_restrictive import NetworkSimulationEngineV4Restrictive
+from .track_aware_exporters import TrackAwareBatchExporter
+from .track_blocks import enumerate_track_blocks
+from .track_block_validation import validate_track_block_config
 
 
 @dataclass
@@ -32,12 +35,48 @@ class ScenarioGeneratorConfig:
 
 
 class ScenarioGenerator:
-    """Generate normal/controlled operating scenarios for Component A."""
+    """Generate normal/controlled operating scenarios for Component A.
+
+    Shared geographic effects such as weather remain logical-block scoped.
+    Operational restrictions are generated against canonical track-block
+    identities so one physical track can be restricted while the parallel track
+    remains unaffected.
+    """
 
     def __init__(self, base_config: SimulationConfig, gen_config: ScenarioGeneratorConfig):
         self.base_config = base_config
         self.gen_config = gen_config
         self._rng = random.Random(gen_config.random_seed)
+
+    @staticmethod
+    def _requires_network_engine(config: SimulationConfig) -> bool:
+        return (
+            len(config.route.track_ids) > 1
+            or bool(config.additional_train_runs)
+            or bool(config.stations)
+            or config.dynamic_signalling
+        )
+
+    @classmethod
+    def _new_engine(cls, config: SimulationConfig, scenario_id: str):
+        if cls._requires_network_engine(config):
+            return NetworkSimulationEngineV4Restrictive(config, scenario_id=scenario_id)
+        return SimulationEngine(config, scenario_id=scenario_id)
+
+    @classmethod
+    def _run_config(cls, config: SimulationConfig, scenario_id: str):
+        engine = cls._new_engine(config, scenario_id)
+        if isinstance(engine, SimulationEngine):
+            return engine.run(), False
+
+        frames = engine.snapshot_all()
+        while not engine.is_complete and engine.sim_time_s < config.simulation.max_simulation_time_s:
+            frames.extend(engine.tick())
+        if not engine.is_complete:
+            raise RuntimeError(
+                f"Scenario {scenario_id} timed out at {engine.sim_time_s:.1f}s before all trains completed"
+            )
+        return frames, True
 
     def _random_weather(self, config: SimulationConfig) -> None:
         choices = [
@@ -85,14 +124,17 @@ class ScenarioGenerator:
         if self._rng.random() >= self.gen_config.tsr_probability:
             config.environment.temporary_speed_restrictions = []
             return
-        block = self._rng.choice(config.route.blocks)
+
+        section = self._rng.choice(enumerate_track_blocks(config.route))
+        block = section.geometry
         start = block.length_m * self._rng.uniform(0.15, 0.55)
         end = min(block.length_m, start + block.length_m * self._rng.uniform(0.15, 0.35))
         limit = min(block.speed_limit_kmh * self._rng.uniform(0.45, 0.75), block.speed_limit_kmh - 5)
         config.environment.temporary_speed_restrictions = [
             TemporarySpeedRestriction(
                 restriction_id="GEN-TSR-001",
-                block_id=block.block_id,
+                block_id=section.block_id,
+                track_id=section.track_id,
                 start_position_m=start,
                 end_position_m=end,
                 speed_limit_kmh=max(20.0, limit),
@@ -146,18 +188,24 @@ class ScenarioGenerator:
         config = copy.deepcopy(self.base_config)
         if self._rng.random() < self.gen_config.baseline_probability:
             self._baseline(config)
-            return config
+            return validate_track_block_config(config)
+
         self._random_weather(config)
         self._random_tsr(config)
         self._random_crossings(config)
         self._random_signals(config)
-        return config
+        return validate_track_block_config(config)
 
-    def run(self) -> BatchExporter:
-        exporter = BatchExporter()
+    def run(self) -> TrackAwareBatchExporter:
+        exporter = TrackAwareBatchExporter()
         for i in range(self.gen_config.n_scenarios):
             scenario_id = f"scenario_{i:05d}"
             config = self._make_scenario()
-            frames = SimulationEngine(config, scenario_id=scenario_id).run()
-            exporter.add(label_completed_journey(frames))
+            frames, is_network = self._run_config(config, scenario_id)
+            labelled = (
+                label_completed_multi_train_journey(frames)
+                if is_network
+                else label_completed_journey(frames)
+            )
+            exporter.add(labelled)
         return exporter

@@ -1,0 +1,92 @@
+/* phase2-v3 layout compatibility: preserve the Phase 2 v2 drawer motion/position
+   while keeping the v3 backend-backed constraint controls. */
+.dashboard {
+  width: min(1780px, calc(100% - 28px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0;
+  column-gap: 0;
+  align-items: start;
+  transition: grid-template-columns .3s cubic-bezier(.2,.8,.2,1), column-gap .3s cubic-bezier(.2,.8,.2,1);
+}
+
+/* Let the main content and drawer participate directly in the dashboard grid. */
+.dashboard-workspace { display: contents; }
+
+.dashboard > .topbar {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  transition: transform .3s cubic-bezier(.2,.8,.2,1);
+}
+
+.dashboard-main {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  transition: transform .3s cubic-bezier(.2,.8,.2,1);
+}
+
+.dashboard.constraints-open {
+  grid-template-columns: minmax(0, 1fr) 420px;
+  column-gap: 16px;
+}
+
+.dashboard.constraints-open > .topbar,
+.dashboard.constraints-open .dashboard-main {
+  transform: translateX(-4px);
+}
+
+.dashboard-workspace > .constraints-drawer {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  position: sticky;
+  top: 14px;
+  align-self: start;
+  opacity: 1;
+  transform: translateX(0);
+  animation: constraint-drawer-in .3s cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes constraint-drawer-in {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Match the v2 selected-button treatment; v3 uses the `open` class name. */
+.constraints-toggle.open {
+  border-color: #38bdf8;
+  background: #0b3149;
+  box-shadow: 0 0 0 2px rgba(56,189,248,.08);
+}
+
+@media (max-width: 1300px) {
+  .dashboard.constraints-open {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    column-gap: 12px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .dashboard,
+  .dashboard.constraints-open {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+  }
+
+  .dashboard.constraints-open > .topbar,
+  .dashboard.constraints-open .dashboard-main {
+    transform: none;
+  }
+
+  .dashboard-workspace > .constraints-drawer {
+    position: fixed;
+    z-index: 80;
+    right: 10px;
+    top: 10px;
+    bottom: 10px;
+    width: min(420px, calc(100vw - 20px));
+    min-height: 0;
+    max-height: none;
+  }
+}

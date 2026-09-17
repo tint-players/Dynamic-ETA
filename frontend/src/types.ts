@@ -1,8 +1,11 @@
 export type SignalAspect = 'GREEN' | 'YELLOW' | 'RED'
+export type SignalType = 'STANDARD' | 'ROUTE_INDICATOR'
 export type WeatherCondition = 'CLEAR' | 'RAIN' | 'HEAVY_RAIN' | 'FOG' | 'HEAVY_FOG'
 export type CrossingState = 'OPEN_FOR_TRAIN' | 'CLOSED_FOR_TRAIN'
 export type TrainDirection = 'FORWARD' | 'REVERSE'
+export type MaintenanceType = 'SPEED_RESTRICTION' | 'FULL_CLOSURE'
 
+/** Shared logical/geographic block geometry. */
 export interface TrackBlockViz {
   block_id: string
   length_m: number
@@ -15,22 +18,37 @@ export interface TrackBlockViz {
   route_end_m: number
 }
 
+/** One operational physical-track section through shared block geometry. */
+export interface OperationalTrackBlockViz extends TrackBlockViz {
+  track_block_id: string
+  track_id: string
+  block_index: number
+  track_index: number
+}
+
 export interface SignalViz {
   signal_id: string
   protected_block_id: string
+  protected_track_block_id: string
   track_id: string
   direction: TrainDirection
+  signal_type: SignalType
+  position_in_block_m: number | null
+  crossover_id: string | null
   route_position_m: number
 }
 
 export interface RestrictionViz {
   restriction_id: string
   block_id: string
+  track_id: string | null
+  track_block_id: string | null
   start_position_m: number
   end_position_m: number
   speed_limit_kmh: number
   start_time_s: number
   end_time_s: number | null
+  maintenance_type?: MaintenanceType
   route_start_m: number
   route_end_m: number
 }
@@ -38,6 +56,8 @@ export interface RestrictionViz {
 export interface CrossingViz {
   crossing_id: string
   block_id: string
+  track_ids: string[]
+  affected_track_block_ids: string[]
   position_in_block_m: number
   route_position_m: number
   timeline: Array<{ start_time_s: number; state: CrossingState }>
@@ -50,6 +70,8 @@ export interface CrossoverViz {
   end_position_m: number
   from_track_id: string
   to_track_id: string
+  from_track_block_id: string
+  to_track_block_id: string
   route_start_m: number
   route_end_m: number
   route_mid_m: number
@@ -67,12 +89,14 @@ export interface TrainConfigViz {
   accel_ms2: number
   service_decel_ms2: number
   emergency_decel_ms2: number
+  dual_cab: boolean
 }
 
 export interface StationPlatformViz {
   platform_id: string
   track_id: string
   block_id: string
+  track_block_id: string
   position_in_block_m: number
   length_m: number
   route_position_m: number
@@ -85,13 +109,20 @@ export interface TrainRunViz {
   journey: { source: { block_id: string; position_in_block_m: number }; destination: { block_id: string; position_in_block_m: number } }
   departure_time_s: number
   station_stops: Array<{ station_id: string; dwell_time_s: number }>
-  track_changes: Array<{ crossover_id: string; reverse_after_change: boolean }>
+  track_changes: Array<{ crossover_id: string; reverse_after_change: boolean; turnaround_signal_id: string | null }>
   source_route_m: number
   destination_route_m: number
 }
 
 export interface SimulatorConfigViz {
-  route: { route_id: string; route_name: string; track_ids: string[]; total_length_m: number; blocks: TrackBlockViz[] }
+  route: {
+    route_id: string
+    route_name: string
+    track_ids: string[]
+    total_length_m: number
+    blocks: TrackBlockViz[]
+    track_blocks: OperationalTrackBlockViz[]
+  }
   signals: SignalViz[]
   dynamic_signalling: boolean
   stations: StationViz[]
@@ -163,6 +194,82 @@ export interface TelemetryFrame {
   total_journey_time_s: number | null
 }
 
+export interface ActiveWeatherConstraint {
+  block_id: string
+  condition: WeatherCondition
+  visibility_m: number
+  start_time_s: number
+  end_time_s: number | null
+}
+
+export interface ActiveRestrictionConstraint {
+  restriction_id: string
+  block_id: string
+  track_id: string | null
+  track_block_id?: string | null
+  start_position_m: number
+  end_position_m: number
+  speed_limit_kmh: number
+  start_time_s: number
+  end_time_s: number | null
+  maintenance_type?: MaintenanceType
+}
+
+export interface ActiveSignalConstraint {
+  signal_id: string
+  aspect: SignalAspect
+  start_time_s: number | null
+  end_time_s: number | null
+}
+
+export interface ConstraintState {
+  sim_time_s: number
+  weather: ActiveWeatherConstraint[]
+  tsr: ActiveRestrictionConstraint[]
+  maintenance: ActiveRestrictionConstraint[]
+  signals: ActiveSignalConstraint[]
+}
+
+export const EMPTY_CONSTRAINT_STATE: ConstraintState = { sim_time_s: 0, weather: [], tsr: [], maintenance: [], signals: [] }
+
+export type ManualInjectionRequest =
+  | {
+      command: 'inject_weather'
+      block_id: string
+      condition: WeatherCondition
+      visibility_m: number
+      duration_s: number | null
+    }
+  | {
+      command: 'inject_signal'
+      signal_id: string
+      aspect: SignalAspect
+      duration_s: number | null
+    }
+  | {
+      command: 'reset_signal'
+      signal_id: string
+    }
+  | {
+      command: 'inject_tsr'
+      block_id: string
+      track_id: string
+      start_position_m: number
+      end_position_m: number
+      speed_limit_kmh: number
+      duration_s: number | null
+    }
+  | {
+      command: 'inject_maintenance'
+      block_id: string
+      track_id: string
+      start_position_m: number
+      end_position_m: number
+      speed_limit_kmh: number
+      maintenance_type: MaintenanceType
+      duration_s: number | null
+    }
+
 export interface SessionCreateResponse {
   session_id: string
   scenario_id: string
@@ -172,13 +279,18 @@ export interface SessionCreateResponse {
   initial_frames: TelemetryFrame[]
   signal_states: Record<string, SignalAspect>
   crossing_states: Record<string, CrossingState>
+  constraint_state: ConstraintState
 }
 
 export interface PlaybackState { playing: boolean; playback_speed: number; complete: boolean }
-export interface ExportPaths { csv: string; parquet: string }
+export interface ExportPaths { csv: string; parquet: string; block_csv?: string; block_parquet?: string }
 
 export type SocketMessage =
   | { type: 'telemetry_batch'; frames: TelemetryFrame[]; signal_states: Record<string, SignalAspect>; crossing_states: Record<string, CrossingState> }
   | ({ type: 'playback_state' } & PlaybackState)
+  | { type: 'config_update'; config: SimulatorConfigViz }
+  | { type: 'constraint_state'; state: ConstraintState }
+  | { type: 'constraints_reset'; sim_time_s: number }
+  | { type: 'injection_applied'; message: string; sim_time_s: number }
   | { type: 'export_complete'; paths: ExportPaths }
   | { type: 'error'; message: string }

@@ -97,6 +97,10 @@ class NetworkSimulationEngine:
     def _restriction_active(self, restriction) -> bool:
         return self.sim_time_s >= restriction.start_time_s and (restriction.end_time_s is None or self.sim_time_s < restriction.end_time_s)
 
+    @staticmethod
+    def _restriction_on_track(restriction, track_id: str) -> bool:
+        return restriction.track_id is None or restriction.track_id == track_id
+
     def _signal_position(self, signal) -> float:
         start = self.config.route.block_start_distance_m(signal.protected_block_id)
         block = self.config.route.blocks[self.config.route.block_index(signal.protected_block_id)]
@@ -168,7 +172,12 @@ class NetworkSimulationEngine:
         if block.curve_speed_limit_kmh is not None: ceiling = min(ceiling, block.curve_speed_limit_kmh)
         ceiling *= weather_speed_factor(weather, visibility)
         for r in [*self.config.environment.temporary_speed_restrictions, *self.config.environment.maintenance_restrictions]:
-            if r.block_id == block.block_id and r.start_position_m <= local < r.end_position_m and self._restriction_active(r):
+            if (
+                self._restriction_on_track(r, train.current_track_id)
+                and r.block_id == block.block_id
+                and r.start_position_m <= local < r.end_position_m
+                and self._restriction_active(r)
+            ):
                 ceiling = min(ceiling, r.speed_limit_kmh)
         return max(0.0, ceiling), weather, visibility
 
@@ -317,7 +326,7 @@ class NetworkSimulationEngine:
             if next_curve is None and future.curve_speed_limit_kmh is not None: next_curve, next_curve_d = future.curve_speed_limit_kmh, d
         next_tsr = None
         for r in self.config.environment.temporary_speed_restrictions:
-            if not self._restriction_active(r): continue
+            if not self._restriction_on_track(r, train.current_track_id) or not self._restriction_active(r): continue
             start = self.config.route.block_start_distance_m(r.block_id)
             pos = start + (r.start_position_m if train.sign > 0 else r.end_position_m)
             d = self._ahead(train, pos)

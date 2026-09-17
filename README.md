@@ -1,75 +1,126 @@
-# Railway Telemetry Simulator — Phase 1
+# Dynamic ETA — Railway Telemetry & ETA Prediction
 
-A standalone, dependency-light simulator core. No web framework, no ML —
-just physics, safety guardrails, and two output modes. Built this way so a
-FastAPI/WebSocket layer and the ETA model can be plugged in later without
-touching this code.
+Dynamic ETA combines a multi-train railway simulator, synthetic telemetry generation, machine-learning ETA modelling, live backend inference and a React dashboard.
 
-## Structure
+The current repository models the Delhi–Agra corridor with 8 shared logical blocks across 2 physical tracks, producing 16 canonical operational track-blocks. The simulator generates one-second operational telemetry that can be labelled after completed journeys and transformed into temporal, graph and train-context inputs for ETA modelling.
 
-```
-simulator/
-  models.py             # Pydantic data models (Track, Train, Telemetry, enums)
-  physics.py             # Pure Euler-integration kinematics + EBD formula
-  guardrails.py           # Effective speed ceiling + EBD signal-override lockout
-  anomaly.py             # Anomaly injection (shared by batch & live callers)
-  engine.py              # The tick loop — advances trains one step at a time
-  exporters.py            # BatchExporter (Parquet/CSV) + LiveExporter (JSON)
-  scenario_generator.py    # Randomized batch runs -> training dataset
-  config_loader.py         # YAML -> validated SimulationConfig
-examples/
-  delhi_agra_corridor.yaml # Example corridor + train definition
-output/                    # Generated datasets land here
-smoke_test.py             # End-to-end demonstration script
-```
+## Documentation
 
-## Why it's split this way
+Use these documents as the source of truth instead of duplicating architecture/path information across multiple root Markdown files:
 
-- **`physics.py`** has zero dependencies on anything else — pure math,
-  easy to unit test, easy to swap (e.g. for a fancier integration method later).
-- **`guardrails.py`** and **`anomaly.py`** are separate from `engine.py` so
-  safety rules can change without touching the tick loop, and vice versa.
-- **`engine.py`** doesn't know or care whether it's called in a batch for-loop
-  or from a future async API route — it just exposes `.tick()`.
-- **`exporters.py`** is the only place that knows about JSON/Parquet — this
-  answers the "is JSON mandatory?" question: it isn't, and it's isolated
-  to one file so you can add e.g. a Kafka/Arrow exporter later in one place.
-- **Config is YAML** validated through Pydantic (`models.py`), so you (or a
-  teammate) can add a new corridor or train by copying `examples/*.yaml`
-  and editing values — no code changes needed. The same models also accept
-  plain Python dicts, so a future API request body works identically.
+- **[Project Overview](docs/OVERVIEW.md)** — problem scope, end-to-end architecture, simulator/ML/backend relationship and current status.
+- **[Simulator & Data Generation](docs/SIMULATOR.md)** — railway representation, engine behaviour, telemetry, randomized scenarios and ground-truth generation.
+- **[File Structure](docs/FILE_STRUCTURE.md)** — dedicated repository path/file-location reference.
 
-## Two ways to run it
+## End-to-end flow
 
-**Batch (generate training data):**
-```python
-from simulator import load_simulation_config, ScenarioGenerator, ScenarioGeneratorConfig
-
-config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-generator = ScenarioGenerator(config, ScenarioGeneratorConfig(n_scenarios=500))
-exporter = generator.run()
-exporter.to_parquet("output/training_data.parquet")
+```text
+Delhi–Agra configuration
+        ↓
+Railway simulator
+        ↓
+1-second telemetry
+        ↓
+Randomized / completed runs
+        ↓
+Post-run ground-truth labels
+        ↓
+Feature engineering
+  ┌─────┼─────┐
+  ↓     ↓     ↓
+60 s   graph  train
+seq.   state  context
+  └─────┼─────┘
+        ↓
+ETA model
+        ↓
+Live backend / dashboard
 ```
 
-**Live (drive it manually / from a future API):**
-```python
-from simulator import load_simulation_config, SimulationEngine, LiveExporter
+## Current operational model
 
-config = load_simulation_config("examples/delhi_agra_corridor.yaml")
-engine = SimulationEngine(config, scenario_id="demo")
-frames = engine.tick()
-json_str = LiveExporter.to_json(frames[0])  # ready to push over WebSocket
+The canonical track-block identities are:
+
+```text
+UP-BLK-01 ... UP-BLK-08
+DOWN-BLK-01 ... DOWN-BLK-08
 ```
 
-## Not yet built (by design — comes after this)
-- FastAPI routes / WebSocket server
-- Redis Pub/Sub bridge
-- Neo4j graph sync
-- The actual ETA prediction model
-- Frontend control panel
+Route geometry and weather are shared at logical-block level. Occupancy, signals, TSRs, maintenance, platform state and traffic are track-specific. Crossings and crossovers explicitly identify the tracks they affect.
 
-## Run the smoke test
+`NetworkSimulationEngineV4Restrictive` is the authoritative multi-track engine. The legacy `SimulationEngine` is retained only for compatibility/regression and is not the source of truth for multi-train signalling, crossovers or track-specific operational behaviour.
+
+## Quick start
+
+### Simulator/backend
+
+From the repository root:
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+
+pip install -r requirements.txt
+python smoke_test.py
+pytest backend/tests -q
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
-pip install pydantic pyyaml pandas pyarrow
-python3 smoke_test.py
+
+### Frontend
+
+In a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
+
+The Vite development server normally opens the dashboard at `http://localhost:5173`.
+
+### Live ML ETA checkpoint
+
+For the packaged Phase-3 live model:
+
+```bash
+pip install -r requirements.txt
+python scripts/setup_live_eta.py
+```
+
+Automatic checkpoint retrieval requires an authenticated GitHub CLI. A manually downloaded checkpoint can instead be installed with:
+
+```bash
+python scripts/setup_live_eta.py --source /path/to/eta_winner.pt
+```
+
+## Dataset safety rule
+
+Ground-truth outcome fields are generated only after a completed journey. In particular:
+
+```text
+actual_remaining_time_s
+actual_arrival_simulation_s
+total_journey_time_s
+```
+
+are labels/outcomes and must not be used as live model inputs.
+
+## Current ML scope
+
+The packaged Phase-3 model predicts remaining time to the final journey destination. The broader project goal includes ETA for upcoming/intermediate stations, but station-wise ETA requires a new target/label design and retraining; it is not an existing capability of the current checkpoint.
+
+## Validation
+
+A standard validation pass is:
+
+```bash
+python smoke_test.py
+pytest backend/tests -q
+
+cd frontend
+npm run typecheck
+npm run build
+```
+
+For detailed behaviour, contracts and implementation notes, follow the documentation links above. File locations are maintained only in [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md).

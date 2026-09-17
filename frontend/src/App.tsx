@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { connectSimulation, createSession, sendCommand } from './api'
+import { connectSimulation, createSession, sendCommand, sendInjection } from './api'
 import Dashboard, { type DebugEvent } from './components/Dashboard'
-import type { CrossingState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
+import type { ConstraintState, CrossingState, ExportPaths, PlaybackState, SessionCreateResponse, SignalAspect, SocketMessage, TelemetryFrame } from './types'
+import { EMPTY_CONSTRAINT_STATE } from './types'
 
 const initialPlayback: PlaybackState = { playing: false, playback_speed: 1, complete: false }
 
@@ -26,6 +27,7 @@ export default function App() {
   const [events, setEvents] = useState<DebugEvent[]>([])
   const [signalStates, setSignalStates] = useState<Record<string, SignalAspect>>({})
   const [crossingStates, setCrossingStates] = useState<Record<string, CrossingState>>({})
+  const [constraintState, setConstraintState] = useState<ConstraintState>(EMPTY_CONSTRAINT_STATE)
   const [playback, setPlayback] = useState<PlaybackState>(initialPlayback)
   const [exportPaths, setExportPaths] = useState<ExportPaths | null>(null)
   const [connection, setConnection] = useState('connecting')
@@ -43,6 +45,7 @@ export default function App() {
         setFrames(created.initial_frames)
         setSignalStates(created.signal_states)
         setCrossingStates(created.crossing_states)
+        setConstraintState(created.constraint_state ?? EMPTY_CONSTRAINT_STATE)
         const initialSelected = created.config.train.train_id
         setSelectedTrainId(initialSelected)
         setHistoryByTrain(Object.fromEntries(created.initial_frames.map((f) => [f.train_id, [f]])))
@@ -60,7 +63,7 @@ export default function App() {
               setCrossingStates(message.crossing_states)
               if (isReset) {
                 setHistoryByTrain(Object.fromEntries(nextFrames.map((f) => [f.train_id, [f]])))
-                setEvents([{ id: 'reset-0', time: 0, text: 'Multi-train simulation reset' }])
+                setEvents([{ id: 'reset-0', time: 0, text: 'Simulation reset to clean baseline' }])
                 setExportPaths(null)
               } else {
                 const additions = nextFrames.flatMap((next) => trainEvents(previousFramesRef.current[next.train_id], next))
@@ -77,6 +80,15 @@ export default function App() {
               previousFramesRef.current = Object.fromEntries(nextFrames.map((f) => [f.train_id, f]))
             } else if (message.type === 'playback_state') {
               setPlayback({ playing: message.playing, playback_speed: message.playback_speed, complete: message.complete })
+            } else if (message.type === 'config_update') {
+              setSession((current) => current ? { ...current, config: message.config } : current)
+            } else if (message.type === 'constraint_state') {
+              setConstraintState(message.state)
+            } else if (message.type === 'constraints_reset') {
+              setConstraintState({ ...EMPTY_CONSTRAINT_STATE, sim_time_s: message.sim_time_s })
+              setEvents((items) => [...items, { id: `constraints-reset-${message.sim_time_s}`, time: message.sim_time_s, text: 'Manual constraints reset; simulation position preserved' }].slice(-400))
+            } else if (message.type === 'injection_applied') {
+              setEvents((items) => [...items, { id: `inject-${message.sim_time_s}-${items.length}`, time: message.sim_time_s, text: message.message }].slice(-400))
             } else if (message.type === 'export_complete') {
               setExportPaths(message.paths)
               const time = Object.values(previousFramesRef.current)[0]?.sim_time_s ?? 0
@@ -112,6 +124,7 @@ export default function App() {
         onSelectTrain={setSelectedTrainId}
         signalStates={signalStates}
         crossingStates={crossingStates}
+        constraintState={constraintState}
         history={selectedHistory}
         events={events}
         playback={playback}
@@ -120,8 +133,10 @@ export default function App() {
         onPlay={() => sendCommand(socketRef.current, 'play')}
         onPause={() => sendCommand(socketRef.current, 'pause')}
         onReset={() => sendCommand(socketRef.current, 'reset')}
+        onResetConstraints={() => sendCommand(socketRef.current, 'reset_constraints')}
         onStep={() => sendCommand(socketRef.current, 'step')}
         onSpeed={(speed) => sendCommand(socketRef.current, 'set_speed', speed)}
+        onInject={(request) => sendInjection(socketRef.current, request)}
       />
     </>
   )
