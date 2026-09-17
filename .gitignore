@@ -1,34 +1,201 @@
-# Virtual environments
-ETA/
-.venv/
-venv/
-env/
+# ============================================================
+# Dynamic ETA - Git Ignore
+# ============================================================
 
-# Python bytecode
+
+# ------------------------------------------------------------
+# Python bytecode / cache
+# ------------------------------------------------------------
+
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
-# Generated datasets / outputs
-output/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
 
-# Frontend dependencies / builds
-frontend/node_modules/
-frontend/dist/
+.coverage
+.coverage.*
+htmlcov/
 
-# Environment & secrets
+
+# ------------------------------------------------------------
+# Python virtual environments
+# ------------------------------------------------------------
+
+.venv/
+venv/
+env/
+ENV/
+ETA/
+
+
+# ------------------------------------------------------------
+# Environment variables / secrets
+# ------------------------------------------------------------
+
 .env
 .env.*
 !.env.example
 
-# Editor & IDE
+*.pem
+*.key
+
+
+# ------------------------------------------------------------
+# Generated simulator output / datasets
+# ------------------------------------------------------------
+
+output/
+
+data/generated/
+data/processed/
+data/cache/
+
+*.parquet
+*.feather
+
+# CSV is intentionally NOT globally ignored.
+# Small/reference CSV files may need to be version controlled.
+
+
+# ------------------------------------------------------------
+# Machine Learning artifacts
+# ------------------------------------------------------------
+
+checkpoints/
+runs/
+models/
+
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+
+# ------------------------------------------------------------
+# ML experiment tracking
+# ------------------------------------------------------------
+
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+
+
+# ------------------------------------------------------------
+# Jupyter
+# ------------------------------------------------------------
+
+.ipynb_checkpoints/
+
+
+# ------------------------------------------------------------
+# Frontend / Node
+# ------------------------------------------------------------
+
+frontend/node_modules/
+frontend/dist/
+
+node_modules/
+dist/
+
+*.tsbuildinfo
+
+
+# ------------------------------------------------------------
+# Logs / temporary files
+# ------------------------------------------------------------
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.cache
+
+tmp/
+temp/
+
+
+# ------------------------------------------------------------
+# IDE / editors
+# ------------------------------------------------------------
+
 .vscode/
 .idea/
+
 *.swp
+*.swo
+*~
 
-# OS
+
+# ------------------------------------------------------------
+# Local AI / development tools
+# ------------------------------------------------------------
+
+.claude/
+.impeccable/
+.opencode/
+
+
+# ------------------------------------------------------------
+# Generated visualizations / reports
+# ------------------------------------------------------------
+
+visualizations/
+reports/generated/
+
+
+# ------------------------------------------------------------
+# OS generated files
+# ------------------------------------------------------------
+
 .DS_Store
-Thumbs.db
+.AppleDouble
+.LSOverride
 
-# Logs
-*.log
+Thumbs.db
+Desktop.ini
+
+
+# ------------------------------------------------------------
+# Python packaging
+# ------------------------------------------------------------
+
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+
+*.egg-info/
+.installed.cfg
+*.egg
+
+
+# ------------------------------------------------------------
+# Test / profiling output
+# ------------------------------------------------------------
+
+.prof/
+profile/
+coverage.xml
+pytestdebug.log
+
+
+# ------------------------------------------------------------
+# Local miscellaneous
+# ------------------------------------------------------------
+
+*.local
+*.orig
