@@ -17,7 +17,11 @@ from .viz import config_for_visualization
 app = FastAPI(title="Dynamic-ETA Simulator Dashboard API", version="0.6.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://dynamic-hnvbaojse-tint-players.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
